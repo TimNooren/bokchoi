@@ -48,7 +48,7 @@ def run(project):
     job_id = main.create_job_id(project)
 
     bucket_name = job_id
-    zip_file_name = 'fleet-{}.zip'.format(project)
+    zip_file_name = 'buzz-{}.zip'.format(project)
 
     ec2_settings = job['EC2']
 
@@ -64,7 +64,7 @@ def run(project):
 @cli.command('undeploy')
 @click.argument('project')
 def undeploy(project):
-    with open('fleet_settings.json') as f_setting:
+    with open('buzz_settings.json') as f_setting:
         settings = json.load(f_setting)
 
     job_id = main.create_job_id(project)

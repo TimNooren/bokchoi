@@ -66,13 +66,13 @@ SCHEDULER_TRUST_POLICY = """{
 
 
 def load_settings():
-    with open('fleet_settings.json', 'r') as f_setting:
+    with open('buzz_settings.json', 'r') as f_setting:
         return json.load(f_setting)
 
 
 def zip_package(name):
     cwd = os.getcwd()
-    zip_name = 'fleet-' + name + '.zip'
+    zip_name = 'buzz-' + name + '.zip'
     rootlen = len(cwd) + 1
 
     with zipfile.ZipFile('\\'.join((cwd, zip_name)), 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -139,7 +139,7 @@ def get_aws_account_id():
 
 def create_job_id(project):
     aws_account_id = get_aws_account_id()
-    return 'fleet-' + hashlib.sha1((aws_account_id + project).encode()).hexdigest()
+    return 'buzz-' + hashlib.sha1((aws_account_id + project).encode()).hexdigest()
 
 
 def request_spot_instance(job_id, settings):
@@ -152,12 +152,12 @@ def request_spot_instance(job_id, settings):
 
     ec2.get_waiter('spot_instance_request_fulfilled').wait(SpotInstanceRequestIds=[spot_instance_request_id])
 
-    tag = ec2.create_tags(Resources=[spot_instance_request_id], Tags=[{'Key': 'fleet-id', 'Value': job_id}])
+    tag = ec2.create_tags(Resources=[spot_instance_request_id], Tags=[{'Key': 'buzz-id', 'Value': job_id}])
 
     response = ec2.describe_spot_instance_requests(SpotInstanceRequestIds=[spot_instance_request_id])
     instance_ids = [request['InstanceId'] for request in response['SpotInstanceRequests']]
 
-    ec2.create_tags(Resources=instance_ids, Tags=[{'Key': 'fleet-id', 'Value': job_id}])
+    ec2.create_tags(Resources=instance_ids, Tags=[{'Key': 'buzz-id', 'Value': job_id}])
 
     click.echo(tag)
 
@@ -274,15 +274,15 @@ def create_lambda_scheduler(job_id, project, schedule):
     import scheduler
 
     cwd = os.getcwd()
-    zip_name = 'fleet-scheduler.zip'
+    zip_name = 'buzz-scheduler.zip'
 
     with zipfile.ZipFile('\\'.join((cwd, zip_name)), 'w', zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.write(scheduler.__file__, 'scheduler.py')
         zip_file.write(__file__, 'main.py')
-        zip_file.write('\\'.join((cwd, 'fleet_settings.json')), 'fleet_settings.json')
+        zip_file.write('\\'.join((cwd, 'buzz_settings.json')), 'buzz_settings.json')
 
     bucket_name = job_id
-    zip_file_name = 'fleet-scheduler.zip'
+    zip_file_name = 'buzz-scheduler.zip'
 
     upload_zip(zip_file_name, bucket_name)
 
@@ -311,7 +311,7 @@ def create_lambda_scheduler(job_id, project, schedule):
                                   , Code={'S3Bucket': bucket_name, 'S3Key': zip_file_name}
                                   , Timeout=30
                                   , Environment={'Variables': {'project': project}}
-                                  , Tags={'fleet-id': job_id})
+                                  , Tags={'buzz-id': job_id})
 
 
 def delete_scheduler_lambda(job_id):
