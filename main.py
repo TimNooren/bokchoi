@@ -307,7 +307,7 @@ def create_lambda_scheduler(job_id, project, schedule):
     lambda_client.create_function(FunctionName=job_id + '-scheduler'
                                   , Runtime='python3.6'
                                   , Handler='scheduler.run'
-                                  , Role='arn:aws:iam::882717719210:role/ZappaLambdaExecution'
+                                  , Role=''
                                   , Code={'S3Bucket': bucket_name, 'S3Key': zip_file_name}
                                   , Timeout=30
                                   , Environment={'Variables': {'project': project}}
