@@ -32,7 +32,11 @@ def deploy(project):
         bucket = main.create_bucket(job['Region'], job_id)
         main.upload_zip(zip_file_name, bucket)
 
-    main.create_role(job_id, bucket)
+    role_name = job_id + '-default-role'
+    policy_document = main.DEFAULT_POLICY.format(bucket=bucket)
+    policy_name = job_id + '-default-policy'
+    main.create_role(role_name, policy_name, policy_document, main.TRUST_POLICY)
+    main.create_instance_profile(role_name, role_name)
 
     if job.get('Schedule'):
 
@@ -77,14 +81,21 @@ def undeploy(project):
     main.terminate_instances(job_id)
     main.delete_bucket(job_id)
 
-    main.delete_instance_profile(job_id)
-    main.delete_policy(job_id)
+    instance_profile_name = job_id + '-default-role'
+    main.delete_instance_profile(instance_profile_name)
+
+    policy_name = job_id + '-default-policy'
+    main.delete_policy(policy_name)
 
     default_role_name = job_id + '-default-role'
     main.delete_role(default_role_name)
 
     main.delete_scheduler_lambda(job_id)
 
+    instance_profile_name = job_id + '-scheduler-role'
+    main.delete_instance_profile(instance_profile_name)
+    policy_name = job_id + '-scheduler-policy'
+    main.delete_policy(policy_name)
     scheduler_role_name = job_id + '-scheduler-role'
     main.delete_role(scheduler_role_name)
 
