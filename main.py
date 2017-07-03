@@ -12,14 +12,25 @@ session = boto3.Session(region_name='eu-west-1')
 ec2 = session.client('ec2')
 
 USER_DATA = """#!/bin/bash
+
+# Install aws-cli
 sudo curl "https://s3.amazonaws.com/aws-cli/awscli-bundle.zip" -o "awscli-bundle.zip"
 python3 -c "import zipfile; zf = zipfile.ZipFile('/awscli-bundle.zip'); zf.extractall('/');"
 sudo chmod u+x /awscli-bundle/install
 python3 /awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws
+
+# Download project zip
 aws s3 cp s3://{bucket}/{package} /tmp/
-cd /tmp
 python3 -c "import zipfile; zf = zipfile.ZipFile('/tmp/{package}'); zf.extractall('/tmp/');"
+
+# Install pip3 and install requirements.txt from project zip if included
+curl -sS https://bootstrap.pypa.io/get-pip.py | sudo python3
+[ -f /tmp/requirements.txt ] && pip3 install -r /tmp/requirements.txt
+
+# Run app
+cd /tmp
 python3 -c "import {app}; {app}.{entry}();"
+shutdown -h now
 """
 
 TRUST_POLICY = """{
@@ -135,7 +146,18 @@ def create_instance_profile(profile_name, role_name=None):
     return create_instance_profile_response['InstanceProfile']
 
 
-def create_role(role_name, policy_name, policy, trust_policy):
+def create_policy(name, document):
+    iam = boto3.client('iam')
+
+    response = iam.create_policy(
+        PolicyName=name,
+        PolicyDocument=document
+    )
+
+    return response['Policy']['Arn']
+
+
+def create_role(role_name, trust_policy, *policy_arns):
     iam = boto3.client('iam')
 
     create_role_response = iam.create_role(
@@ -143,15 +165,11 @@ def create_role(role_name, policy_name, policy, trust_policy):
         AssumeRolePolicyDocument=trust_policy
     )
 
-    create_policy_response = iam.create_policy(
-        PolicyName=policy_name,
-        PolicyDocument=policy
-    )
-
-    attach_role_policy_response = iam.attach_role_policy(
-        RoleName=role_name,
-        PolicyArn=create_policy_response['Policy']['Arn']
-    )
+    for policy_arn in policy_arns:
+        attach_role_policy_response = iam.attach_role_policy(
+            RoleName=role_name,
+            PolicyArn=policy_arn
+        )
 
     return create_role_response['Role']
 
@@ -318,22 +336,37 @@ def create_lambda_scheduler(job_id, project, schedule):
 
     upload_zip(zip_file_name, bucket_name)
 
-    role_name = job_id + '-scheduler-role'
     policy_document = SCHEDULER_POLICY
     policy_name = job_id + '-scheduler-policy'
-    response = create_role(role_name, policy_name, policy_document, SCHEDULER_TRUST_POLICY)
+    policy_arn = create_policy(policy_name, policy_document)
+
+    role_name = job_id + '-scheduler-role'
+    response = create_role(role_name, SCHEDULER_TRUST_POLICY, policy_arn)
 
     lambda_client = session.client('lambda')
-
+    print(schedule)
     sleep(40)
-    lambda_client.create_function(FunctionName=job_id + '-scheduler'
-                                  , Runtime='python3.6'
-                                  , Handler='scheduler.run'
-                                  , Role=response['Arn']
-                                  , Code={'S3Bucket': bucket_name, 'S3Key': zip_file_name}
-                                  , Timeout=30
-                                  , Environment={'Variables': {'project': project}}
-                                  , Tags={'buzz-id': job_id})
+
+    # AWS has some specific demands on cron schedule:
+    # http://docs.aws.amazon.com/lambda/latest/dg/tutorial-scheduled-events-schedule-expressions.html
+    create_function_response = lambda_client.create_function(FunctionName=job_id + '-scheduler'
+                                                             , Runtime='python3.6'
+                                                             , Handler='scheduler.run'
+                                                             , Role=response['Arn']
+                                                             , Code={'S3Bucket': bucket_name, 'S3Key': zip_file_name}
+                                                             , Timeout=30
+                                                             , Environment={'Variables': {'project': project}}
+                                                             , Tags={'buzz-id': job_id})
+
+    events = boto3.client('events')
+
+    rule_name = job_id + '-schedule-event'
+    events.put_rule(Name=rule_name
+                    , ScheduleExpression='cron({})'.format(schedule)
+                    , State='ENABLED')
+
+    events.put_targets(Rule=rule_name
+                       , Targets=[{'Arn': create_function_response['FunctionArn'], 'Id': '0'}])
 
 
 def delete_scheduler_lambda(job_id):
@@ -344,5 +377,27 @@ def delete_scheduler_lambda(job_id):
     except ClientError as e:
         if e.response['Error']['Code'] == 'ResourceNotFoundException':
             print('Function does not exist')
+        else:
+            raise e
+
+
+def delete_cloudwatch_rule(rule_name):
+
+    events = boto3.client('events')
+
+    try:
+        events.remove_targets(Rule=rule_name
+                              , Ids=['0'])
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceNotFoundException':
+            print('No targets to remove from rule')
+        else:
+            raise e
+
+    try:
+        events.delete_rule(Name=rule_name)
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceNotFoundException':
+            print('Cloudwatch rule does not exist')
         else:
             raise e

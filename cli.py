@@ -3,9 +3,7 @@ import os
 import base64
 import click
 import json
-import zipfile
 
-import scheduler
 import main
 
 
@@ -24,7 +22,10 @@ def deploy(project):
 
     job_id = main.create_job_id(project)
 
-    zip_file_name = main.zip_package(project)
+    cwd = os.getcwd()
+    zip_file_name = 'buzz-{}.zip'.format(project)
+    if not os.path.isfile('\\'.join((cwd, zip_file_name))):
+        zip_file_name = main.zip_package(project)
 
     if job['EC2']['DryRun']:
         bucket = 'mock_bucket'
@@ -33,9 +34,25 @@ def deploy(project):
         main.upload_zip(zip_file_name, bucket)
 
     role_name = job_id + '-default-role'
+
+    policy_arns = []
+
     policy_document = main.DEFAULT_POLICY.format(bucket=bucket)
     policy_name = job_id + '-default-policy'
-    main.create_role(role_name, policy_name, policy_document, main.TRUST_POLICY)
+    default_policy_arn = main.create_policy(policy_name, policy_document)
+    policy_arns.append(default_policy_arn)
+
+    try:
+        with open('custom_policy.json', 'r') as custom_policy_file:
+            custom_policy = custom_policy_file.read()
+
+        policy_name = job_id + '-custom-policy'
+        custom_policy_arn = main.create_policy(policy_name, custom_policy)
+        policy_arns.append(custom_policy_arn)
+    except IOError:
+        pass
+
+    main.create_role(role_name, main.TRUST_POLICY, *policy_arns)
     main.create_instance_profile(role_name, role_name)
 
     if job.get('Schedule'):
@@ -81,11 +98,17 @@ def undeploy(project):
     main.terminate_instances(job_id)
     main.delete_bucket(job_id)
 
-    instance_profile_name = job_id + '-default-role'
-    main.delete_instance_profile(instance_profile_name)
-
     policy_name = job_id + '-default-policy'
     main.delete_policy(policy_name)
+
+    policy_name = job_id + '-custom-policy'
+    main.delete_policy(policy_name)
+
+    policy_name = job_id + '-scheduler-policy'
+    main.delete_policy(policy_name)
+
+    instance_profile_name = job_id + '-default-role'
+    main.delete_instance_profile(instance_profile_name)
 
     default_role_name = job_id + '-default-role'
     main.delete_role(default_role_name)
@@ -94,10 +117,12 @@ def undeploy(project):
 
     instance_profile_name = job_id + '-scheduler-role'
     main.delete_instance_profile(instance_profile_name)
-    policy_name = job_id + '-scheduler-policy'
-    main.delete_policy(policy_name)
+
     scheduler_role_name = job_id + '-scheduler-role'
     main.delete_role(scheduler_role_name)
+
+    rule_name = job_id + '-schedule-event'
+    main.delete_cloudwatch_rule(rule_name)
 
     click.secho('Undeployed', fg='red')
     click.echo(settings.get(project))
