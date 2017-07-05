@@ -23,7 +23,7 @@ def deploy(project):
     job_id = main.create_job_id(project)
 
     cwd = os.getcwd()
-    zip_file_name = 'buzz-{}.zip'.format(project)
+    zip_file_name = 'bokchoi-{}.zip'.format(project)
     if not os.path.isfile('\\'.join((cwd, zip_file_name))):
         zip_file_name = main.zip_package(project)
 
@@ -69,7 +69,7 @@ def run(project):
     job_id = main.create_job_id(project)
 
     bucket_name = job_id
-    zip_file_name = 'buzz-{}.zip'.format(project)
+    zip_file_name = 'bokchoi-{}.zip'.format(project)
 
     ec2_settings = job['EC2']
 
@@ -85,7 +85,7 @@ def run(project):
 @cli.command('undeploy')
 @click.argument('project')
 def undeploy(project):
-    with open('buzz_settings.json') as f_setting:
+    with open('bokchoi_settings.json') as f_setting:
         settings = json.load(f_setting)
 
     job_id = main.create_job_id(project)

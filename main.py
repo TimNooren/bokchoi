@@ -97,13 +97,13 @@ SCHEDULER_POLICY = """{
 
 
 def load_settings():
-    with open('buzz_settings.json', 'r') as f_setting:
+    with open('bokchoi_settings.json', 'r') as f_setting:
         return json.load(f_setting)
 
 
 def zip_package(name):
     cwd = os.getcwd()
-    zip_name = 'buzz-' + name + '.zip'
+    zip_name = 'bokchoi-' + name + '.zip'
     rootlen = len(cwd) + 1
 
     with zipfile.ZipFile('\\'.join((cwd, zip_name)), 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -180,7 +180,7 @@ def get_aws_account_id():
 
 def create_job_id(project):
     aws_account_id = get_aws_account_id()
-    return 'buzz-' + hashlib.sha1((aws_account_id + project).encode()).hexdigest()
+    return 'bokchoi-' + hashlib.sha1((aws_account_id + project).encode()).hexdigest()
 
 
 def request_spot_instance(job_id, settings):
@@ -193,19 +193,19 @@ def request_spot_instance(job_id, settings):
 
     ec2.get_waiter('spot_instance_request_fulfilled').wait(SpotInstanceRequestIds=[spot_instance_request_id])
 
-    tag = ec2.create_tags(Resources=[spot_instance_request_id], Tags=[{'Key': 'buzz-id', 'Value': job_id}])
+    tag = ec2.create_tags(Resources=[spot_instance_request_id], Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
 
     response = ec2.describe_spot_instance_requests(SpotInstanceRequestIds=[spot_instance_request_id])
     instance_ids = [request['InstanceId'] for request in response['SpotInstanceRequests']]
 
-    ec2.create_tags(Resources=instance_ids, Tags=[{'Key': 'buzz-id', 'Value': job_id}])
+    ec2.create_tags(Resources=instance_ids, Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
 
     print(tag)
 
 
 def cancel_spot_request(job_id):
     print('\nCancelling spot request')
-    filters = [{'Name': 'tag:buzz-id', 'Values': [str(job_id)]}
+    filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(job_id)]}
                , {'Name': 'state', 'Values': ['open', 'active']}]
     response = ec2.describe_spot_instance_requests(Filters=filters)
 
@@ -224,7 +224,7 @@ def cancel_spot_request(job_id):
 
 def terminate_instances(job_id):
     print('\nTerminating instances')
-    filters = [{'Name': 'tag:buzz-id', 'Values': [str(job_id)]}]
+    filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(job_id)]}]
     ec2_resource = session.resource('ec2')
     ec2_resource.instances.filter(Filters=filters).terminate()
     print('Instances terminated')
@@ -324,15 +324,15 @@ def create_lambda_scheduler(job_id, project, schedule):
     import scheduler
 
     cwd = os.getcwd()
-    zip_name = 'buzz-scheduler.zip'
+    zip_name = 'bokchoi-scheduler.zip'
 
     with zipfile.ZipFile('\\'.join((cwd, zip_name)), 'w', zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.write(scheduler.__file__, 'scheduler.py')
         zip_file.write(__file__, 'main.py')
-        zip_file.write('\\'.join((cwd, 'buzz_settings.json')), 'buzz_settings.json')
+        zip_file.write('\\'.join((cwd, 'bokchoi_settings.json')), 'bokchoi_settings.json')
 
     bucket_name = job_id
-    zip_file_name = 'buzz-scheduler.zip'
+    zip_file_name = 'bokchoi-scheduler.zip'
 
     upload_zip(zip_file_name, bucket_name)
 
@@ -356,7 +356,7 @@ def create_lambda_scheduler(job_id, project, schedule):
                                                              , Code={'S3Bucket': bucket_name, 'S3Key': zip_file_name}
                                                              , Timeout=30
                                                              , Environment={'Variables': {'project': project}}
-                                                             , Tags={'buzz-id': job_id})
+                                                             , Tags={'bokchoi-id': job_id})
 
     events = boto3.client('events')
 

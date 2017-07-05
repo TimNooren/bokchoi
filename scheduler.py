@@ -15,7 +15,7 @@ def run(event, context):
     job_id = main.create_job_id(PROJECT)
 
     bucket_name = job_id
-    zip_file_name = 'buzz-{}.zip'.format(PROJECT)
+    zip_file_name = 'bokchoi-{}.zip'.format(PROJECT)
 
     ec2_settings = job['EC2']
 

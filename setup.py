@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name="buzz",
+    name="bokchoi",
     version='0.1',
     py_modules=['cli', 'main', 'scheduler'],
     install_requires=[
@@ -10,6 +10,6 @@ setup(
     ],
     entry_points='''
         [console_scripts]
-        buzz=cli:cli
+        bokchoi=cli:cli
     ''',
 )
