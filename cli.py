@@ -2,7 +2,6 @@
 import os
 import base64
 import click
-import json
 
 import main
 
@@ -27,11 +26,8 @@ def deploy(project):
     if not os.path.isfile('\\'.join((cwd, zip_file_name))):
         zip_file_name = main.zip_package(project)
 
-    if job['EC2']['DryRun']:
-        bucket = 'mock_bucket'
-    else:
-        bucket = main.create_bucket(job['Region'], job_id)
-        main.upload_zip(zip_file_name, bucket)
+    bucket = main.create_bucket(job['Region'], job_id)
+    main.upload_zip(zip_file_name, bucket)
 
     role_name = job_id + '-default-role'
 
@@ -42,15 +38,13 @@ def deploy(project):
     default_policy_arn = main.create_policy(policy_name, policy_document)
     policy_arns.append(default_policy_arn)
 
-    try:
-        with open('custom_policy.json', 'r') as custom_policy_file:
-            custom_policy = custom_policy_file.read()
+    if job.get('CustomPolicy'):
+        print('Creating custom policy')
+        custom_policy = job['CustomPolicy']
 
         policy_name = job_id + '-custom-policy'
         custom_policy_arn = main.create_policy(policy_name, custom_policy)
         policy_arns.append(custom_policy_arn)
-    except IOError:
-        pass
 
     main.create_role(role_name, main.TRUST_POLICY, *policy_arns)
     main.create_instance_profile(role_name, role_name)
@@ -85,12 +79,11 @@ def run(project):
 @cli.command('undeploy')
 @click.argument('project')
 def undeploy(project):
-    with open('bokchoi_settings.json') as f_setting:
-        settings = json.load(f_setting)
+    settings = main.load_settings()
+    job = settings[project]
 
     job_id = main.create_job_id(project)
 
-    job = settings[project]
     ec2_settings = job['EC2']
     dry_run = ec2_settings['DryRun']
 
@@ -107,6 +100,9 @@ def undeploy(project):
     policy_name = job_id + '-scheduler-policy'
     main.delete_policy(policy_name)
 
+    policy_name = job_id + '-event-policy'
+    main.delete_policy(policy_name)
+
     instance_profile_name = job_id + '-default-role'
     main.delete_instance_profile(instance_profile_name)
 
@@ -119,6 +115,9 @@ def undeploy(project):
     main.delete_instance_profile(instance_profile_name)
 
     scheduler_role_name = job_id + '-scheduler-role'
+    main.delete_role(scheduler_role_name)
+
+    scheduler_role_name = job_id + '-event-role'
     main.delete_role(scheduler_role_name)
 
     rule_name = job_id + '-schedule-event'

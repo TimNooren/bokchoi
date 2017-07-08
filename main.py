@@ -95,6 +95,33 @@ SCHEDULER_POLICY = """{
   }]
 }"""
 
+EVENT_POLICY = """{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "lambda:InvokeFunction"
+      ],
+      "Resource": "*"
+    }
+  ]
+}"""
+
+EVENT_TRUST_POLICY = """{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "events.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}"""
+
 
 def load_settings():
     with open('bokchoi_settings.json', 'r') as f_setting:
@@ -109,6 +136,9 @@ def zip_package(name):
     with zipfile.ZipFile('\\'.join((cwd, zip_name)), 'w', zipfile.ZIP_DEFLATED) as zip_file:
         for base, dirs, files in os.walk(cwd):
             for file in files:
+                if file.endswith('.zip'):
+                    continue
+
                 fn = os.path.join(base, file)
                 zip_file.write(fn, fn[rootlen:])
 
@@ -164,12 +194,14 @@ def create_role(role_name, trust_policy, *policy_arns):
         RoleName=role_name,
         AssumeRolePolicyDocument=trust_policy
     )
-
+    print('Policy arns: ', *policy_arns)
     for policy_arn in policy_arns:
         attach_role_policy_response = iam.attach_role_policy(
             RoleName=role_name,
             PolicyArn=policy_arn
         )
+
+        print(attach_role_policy_response)
 
     return create_role_response['Role']
 
@@ -360,13 +392,30 @@ def create_lambda_scheduler(job_id, project, schedule):
 
     events = boto3.client('events')
 
+    policy_document = EVENT_POLICY
+    policy_name = job_id + '-event-policy'
+    policy_arn = create_policy(policy_name, policy_document)
+
+    role_name = job_id + '-event-role'
+    response = create_role(role_name, EVENT_TRUST_POLICY, policy_arn)
+
+    sleep(40)
+
     rule_name = job_id + '-schedule-event'
     events.put_rule(Name=rule_name
                     , ScheduleExpression='cron({})'.format(schedule)
-                    , State='ENABLED')
+                    , State='ENABLED'
+                    , RoleArn=response['Arn'])
 
     events.put_targets(Rule=rule_name
                        , Targets=[{'Arn': create_function_response['FunctionArn'], 'Id': '0'}])
+
+    response = lambda_client.add_permission(
+        FunctionName=job_id + '-scheduler',
+        StatementId='0',
+        Action='lambda:InvokeFunction',
+        Principal='events.amazonaws.com'
+    )
 
 
 def delete_scheduler_lambda(job_id):
