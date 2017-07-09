@@ -3,7 +3,7 @@ import os
 import base64
 import click
 
-import main
+from . import main
 
 
 @click.group()

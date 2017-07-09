@@ -1,14 +1,14 @@
 
-import boto3
 import base64
 import os
 
-import main
 
 PROJECT = os.environ.get('project')
 
 
 def run(event, context):
+
+    import main
 
     settings = main.load_settings()
     job = settings[PROJECT]

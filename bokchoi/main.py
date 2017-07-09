@@ -1,14 +1,15 @@
 
 from time import sleep
-import boto3
+import hashlib
 import json
 import os
 import zipfile
-import hashlib
+
+import boto3
 from botocore.exceptions import ClientError
 
 
-session = boto3.Session(region_name='eu-west-1')
+session = boto3.Session()
 ec2 = session.client('ec2')
 
 USER_DATA = """#!/bin/bash
@@ -134,12 +135,12 @@ def zip_package(name):
     rootlen = len(cwd) + 1
 
     with zipfile.ZipFile('\\'.join((cwd, zip_name)), 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for base, dirs, files in os.walk(cwd):
-            for file in files:
-                if file.endswith('.zip'):
+        for base, _, files in os.walk(cwd):
+            for file_name in files:
+                if file_name.endswith('.zip'):
                     continue
 
-                fn = os.path.join(base, file)
+                fn = os.path.join(base, file_name)
                 zip_file.write(fn, fn[rootlen:])
 
     return zip_name
@@ -194,7 +195,7 @@ def create_role(role_name, trust_policy, *policy_arns):
         RoleName=role_name,
         AssumeRolePolicyDocument=trust_policy
     )
-    print('Policy arns: ', *policy_arns)
+
     for policy_arn in policy_arns:
         attach_role_policy_response = iam.attach_role_policy(
             RoleName=role_name,
@@ -221,13 +222,15 @@ def request_spot_instance(job_id, settings):
 
     print(response)
 
-    spot_instance_request_id = response['SpotInstanceRequests'][0]['SpotInstanceRequestId']
+    spot_request_id = response['SpotInstanceRequests'][0]['SpotInstanceRequestId']
 
-    ec2.get_waiter('spot_instance_request_fulfilled').wait(SpotInstanceRequestIds=[spot_instance_request_id])
+    waiter = ec2.get_waiter('spot_instance_request_fulfilled')
+    waiter.wait(SpotInstanceRequestIds=[spot_request_id])
 
-    tag = ec2.create_tags(Resources=[spot_instance_request_id], Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
+    tag = ec2.create_tags(Resources=[spot_request_id]
+                          , Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
 
-    response = ec2.describe_spot_instance_requests(SpotInstanceRequestIds=[spot_instance_request_id])
+    response = ec2.describe_spot_instance_requests(SpotInstanceRequestIds=[spot_request_id])
     instance_ids = [request['InstanceId'] for request in response['SpotInstanceRequests']]
 
     ec2.create_tags(Resources=instance_ids, Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
@@ -241,10 +244,10 @@ def cancel_spot_request(job_id):
                , {'Name': 'state', 'Values': ['open', 'active']}]
     response = ec2.describe_spot_instance_requests(Filters=filters)
 
-    spot_instance_request_ids = [request['SpotInstanceRequestId'] for request in response['SpotInstanceRequests']]
+    spot_request_ids = [request['SpotInstanceRequestId'] for request in response['SpotInstanceRequests']]
 
     try:
-        ec2.cancel_spot_instance_requests(SpotInstanceRequestIds=spot_instance_request_ids)
+        ec2.cancel_spot_instance_requests(SpotInstanceRequestIds=spot_request_ids)
     except ClientError as e:
         if e.response['Error']['Code'] == 'InvalidParameterCombination':
             print('No spot requests to cancel')
@@ -374,7 +377,7 @@ def delete_policy(policy):
 
 def create_lambda_scheduler(job_id, project, schedule):
 
-    import scheduler
+    from . import scheduler
 
     cwd = os.getcwd()
     zip_name = 'bokchoi-scheduler.zip'
@@ -396,20 +399,21 @@ def create_lambda_scheduler(job_id, project, schedule):
     role_name = job_id + '-scheduler-role'
     response = create_role(role_name, SCHEDULER_TRUST_POLICY, policy_arn)
 
-    lambda_client = session.client('lambda')
+    lmbda = session.client('lambda')
     print(schedule)
     sleep(40)
 
     # AWS has some specific demands on cron schedule:
     # http://docs.aws.amazon.com/lambda/latest/dg/tutorial-scheduled-events-schedule-expressions.html
-    create_function_response = lambda_client.create_function(FunctionName=job_id + '-scheduler'
-                                                             , Runtime='python3.6'
-                                                             , Handler='scheduler.run'
-                                                             , Role=response['Arn']
-                                                             , Code={'S3Bucket': bucket_name, 'S3Key': zip_file_name}
-                                                             , Timeout=30
-                                                             , Environment={'Variables': {'project': project}}
-                                                             , Tags={'bokchoi-id': job_id})
+    create_function_response = lmbda.create_function(FunctionName=job_id + '-scheduler'
+                                                     , Runtime='python3.6'
+                                                     , Handler='scheduler.run'
+                                                     , Role=response['Arn']
+                                                     , Code={'S3Bucket': bucket_name
+                                                             , 'S3Key': zip_file_name}
+                                                     , Timeout=30
+                                                     , Environment={'Variables': {'project': project}}
+                                                     , Tags={'bokchoi-id': job_id})
 
     events = boto3.client('events')
 
@@ -431,7 +435,7 @@ def create_lambda_scheduler(job_id, project, schedule):
     events.put_targets(Rule=rule_name
                        , Targets=[{'Arn': create_function_response['FunctionArn'], 'Id': '0'}])
 
-    response = lambda_client.add_permission(
+    response = lmbda.add_permission(
         FunctionName=job_id + '-scheduler',
         StatementId='0',
         Action='lambda:InvokeFunction',
@@ -440,10 +444,10 @@ def create_lambda_scheduler(job_id, project, schedule):
 
 
 def delete_scheduler_lambda(job_id):
-    lambda_client = boto3.client('lambda')
+    lmbda = boto3.client('lambda')
 
     try:
-        lambda_client.delete_function(FunctionName=job_id + '-scheduler')
+        lmbda.delete_function(FunctionName=job_id + '-scheduler')
     except ClientError as e:
         if e.response['Error']['Code'] == 'ResourceNotFoundException':
             print('Function does not exist')
