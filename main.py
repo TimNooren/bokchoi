@@ -155,8 +155,8 @@ def create_bucket(region, job_id):
     bucket_name = job_id
 
     s3 = session.resource('s3')
-    response = s3.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': region})
-    print(response)
+    s3.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': region})
+
     return bucket_name
 
 
@@ -277,11 +277,16 @@ def delete_bucket(job_id):
             raise e
 
 
-def delete_instance_profile(instance_profile_name):
-    print('\nDelete Instance Profile')
-    iam_resource = session.resource('iam')
+def get_instance_profiles(job_id):
+    iam = session.resource('iam')
+    for instance_profile in iam.instance_profiles.all():
+        if job_id in instance_profile.instance_profile_name:
+            yield instance_profile
 
-    instance_profile = iam_resource.InstanceProfile(instance_profile_name)
+
+def delete_instance_profile(instance_profile):
+    instance_profile_name = instance_profile.instance_profile_name
+    print('\nDeleting Instance Profile:', instance_profile_name)
 
     try:
         for role in instance_profile.roles_attribute:
@@ -300,15 +305,24 @@ def delete_instance_profile(instance_profile_name):
         else:
             raise e
 
+    print('Successfully deleted Instance Profile:', instance_profile_name)
 
-def delete_role(role_name):
-    print('\nDelete Role')
-    iam_resource = session.resource('iam')
-    role = iam_resource.Role(role_name)
+
+def get_roles(job_id):
+    iam = session.resource('iam')
+    for role in iam.roles.all():
+        if job_id in role.role_name:
+            yield role
+
+
+def delete_role(role):
+
+    role_name = role.role_name
+    print('\nDeleting Role:', role_name)
 
     try:
         for policy in role.attached_policies.all():
-            policy.detach_role(RoleName=role_name)
+            policy.detach_role(RoleName=role.role_name)
     except ClientError as e:
         if e.response['Error']['Code'] == 'NoSuchEntity':
             print('No policies to detach')
@@ -323,15 +337,20 @@ def delete_role(role_name):
         else:
             raise e
 
+    print('Successfully deleted role:', role_name)
 
-def delete_policy(policy_name):
-    print('\nDelete Policy')
-    aws_account_id = get_aws_account_id()
-    arn = 'arn:aws:iam::{aws_account_id}:policy/{name}'.format(aws_account_id=aws_account_id
-                                                               , name=policy_name)
 
-    iam_resource = session.resource('iam')
-    policy = iam_resource.Policy(arn)
+def get_policies(job_id):
+    iam = session.resource('iam')
+    for policy in iam.policies.filter(Scope='Local'):
+        if job_id in policy.policy_name:
+            yield policy
+
+
+def delete_policy(policy):
+
+    policy_name = policy.policy_name
+    print('\nDeleting Policy:', policy_name)
 
     try:
         for role in policy.attached_roles.all():
@@ -349,6 +368,8 @@ def delete_policy(policy_name):
             print('Policy does not exist')
         else:
             raise e
+
+    print('Successfully deleted Policy:', policy_name)
 
 
 def create_lambda_scheduler(job_id, project, schedule):

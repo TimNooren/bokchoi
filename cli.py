@@ -18,7 +18,6 @@ def deploy(project):
     settings = main.load_settings()
 
     job = settings[project]
-
     job_id = main.create_job_id(project)
 
     cwd = os.getcwd()
@@ -27,6 +26,8 @@ def deploy(project):
         zip_file_name = main.zip_package(project)
 
     bucket = main.create_bucket(job['Region'], job_id)
+    click.secho('Created bucket: ' + bucket, fg='green')
+
     main.upload_zip(zip_file_name, bucket)
 
     role_name = job_id + '-default-role'
@@ -79,49 +80,26 @@ def run(project):
 @cli.command('undeploy')
 @click.argument('project')
 def undeploy(project):
-    settings = main.load_settings()
-    job = settings[project]
 
     job_id = main.create_job_id(project)
 
-    ec2_settings = job['EC2']
-    dry_run = ec2_settings['DryRun']
-
     main.cancel_spot_request(job_id)
     main.terminate_instances(job_id)
+
     main.delete_bucket(job_id)
 
-    policy_name = job_id + '-default-policy'
-    main.delete_policy(policy_name)
+    for policy in main.get_policies(job_id):
+        main.delete_policy(policy)
 
-    policy_name = job_id + '-custom-policy'
-    main.delete_policy(policy_name)
+    for instance_profile in main.get_instance_profiles(job_id):
+        main.delete_instance_profile(instance_profile)
 
-    policy_name = job_id + '-scheduler-policy'
-    main.delete_policy(policy_name)
-
-    policy_name = job_id + '-event-policy'
-    main.delete_policy(policy_name)
-
-    instance_profile_name = job_id + '-default-role'
-    main.delete_instance_profile(instance_profile_name)
-
-    default_role_name = job_id + '-default-role'
-    main.delete_role(default_role_name)
+    for role in main.get_roles(job_id):
+        main.delete_role(role)
 
     main.delete_scheduler_lambda(job_id)
-
-    instance_profile_name = job_id + '-scheduler-role'
-    main.delete_instance_profile(instance_profile_name)
-
-    scheduler_role_name = job_id + '-scheduler-role'
-    main.delete_role(scheduler_role_name)
-
-    scheduler_role_name = job_id + '-event-role'
-    main.delete_role(scheduler_role_name)
 
     rule_name = job_id + '-schedule-event'
     main.delete_cloudwatch_rule(rule_name)
 
     click.secho('Undeployed', fg='red')
-    click.echo(settings.get(project))
