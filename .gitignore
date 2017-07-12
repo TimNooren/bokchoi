@@ -2,5 +2,5 @@ test/
 dist/
 *.egg-info
 *.zip
-*.pylintr
-*.pypirc
+.pylintrc
+.pypirc
