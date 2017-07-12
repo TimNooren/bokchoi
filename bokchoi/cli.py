@@ -22,8 +22,11 @@ def deploy(project):
 
     cwd = os.getcwd()
     zip_file_name = 'bokchoi-{}.zip'.format(project)
+
+    requirements = job.get('Requirements', None)
+
     if not os.path.isfile('\\'.join((cwd, zip_file_name))):
-        zip_file_name = main.zip_package(project)
+        zip_file_name = main.zip_package(project, requirements)
 
     bucket = main.create_bucket(job['Region'], job_id)
     click.secho('Created bucket: ' + bucket, fg='green')
@@ -53,7 +56,7 @@ def deploy(project):
     if job.get('Schedule'):
 
         schedule = job.get('Schedule')
-        main.create_lambda_scheduler(job_id, project, schedule)
+        main.create_lambda_scheduler(job_id, project, schedule, requirements)
 
 
 @cli.command('run')

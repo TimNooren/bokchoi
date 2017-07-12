@@ -129,7 +129,7 @@ def load_settings():
         return json.load(f_setting)
 
 
-def zip_package(name):
+def zip_package(name, requirements=None):
     cwd = os.getcwd()
     zip_name = 'bokchoi-' + name + '.zip'
     rootlen = len(cwd) + 1
@@ -142,6 +142,9 @@ def zip_package(name):
 
                 fn = os.path.join(base, file_name)
                 zip_file.write(fn, fn[rootlen:])
+
+        if requirements:
+            zip_file.writestr('requirements.txt', '\n'.join(requirements))
 
     return zip_name
 
@@ -375,7 +378,7 @@ def delete_policy(policy):
     print('Successfully deleted Policy:', policy_name)
 
 
-def create_lambda_scheduler(job_id, project, schedule):
+def create_lambda_scheduler(job_id, project, schedule, requirements=None):
 
     from . import scheduler
 
@@ -386,6 +389,9 @@ def create_lambda_scheduler(job_id, project, schedule):
         zip_file.write(scheduler.__file__, 'scheduler.py')
         zip_file.write(__file__, 'main.py')
         zip_file.write('\\'.join((cwd, 'bokchoi_settings.json')), 'bokchoi_settings.json')
+    
+        if requirements:
+            zip_file.writestr('requirements.txt', '\n'.join(requirements))
 
     bucket_name = job_id
     zip_file_name = 'bokchoi-scheduler.zip'
