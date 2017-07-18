@@ -23,27 +23,27 @@ YourProjectFolder
 In your project folder create a settings file named **bokchoi_settings.json**:
 ```
 YourProjectFolder
-├─ deepest_nn.py
+├─ deep_nn.py
 └─ bokchoi_settings.json
 ```
 This file should contain the following:
 
 ```json
 {
-  "job_name": {    # Used to deploy your job
-    "EntryPoint": "deep_nn.main",  # function called once spot instance is launched
-    "Region": "us-east-1",  # The region you wish to deploy to
+  "job_name": {
+    "EntryPoint": "deep_nn.main",
+    "Region": "us-east-1",
     "Requirements": [
       "numpy==1.13.0",
       "boto3==1.4.4"
     ],
     "EC2": {
-      "InstanceCount": 1,   # Number of spot instances
-      "SpotPrice": "0.1",   # Maximum bid price (dollars)
+      "InstanceCount": 1,
+      "SpotPrice": "0.1",
       "LaunchSpecification": {
-        "ImageId": "ami-a9210ebf",  # Currently only Ubuntu 16.04 is supported
+        "ImageId": "ami-a9210ebf",
         "InstanceType": "c4.large",
-        "SubnetId": "subnet-2dr85kr9"   # Subnet to deploy spot instances into
+        "SubnetId": "subnet-2dr85kr9"
       }
     }
   }
