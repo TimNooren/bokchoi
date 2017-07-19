@@ -20,18 +20,14 @@ def deploy(project):
     job = settings[project]
     job_id = main.create_job_id(project)
 
-    cwd = os.getcwd()
-    zip_file_name = 'bokchoi-{}.zip'.format(project)
-
     requirements = job.get('Requirements', None)
-
-    if not os.path.isfile('\\'.join((cwd, zip_file_name))):
-        zip_file_name = main.zip_package(project, requirements)
 
     bucket = main.create_bucket(job['Region'], job_id)
     click.secho('Created bucket: ' + bucket, fg='green')
 
-    main.upload_zip(zip_file_name, bucket)
+    cwd = os.getcwd()
+    zip_file, zip_file_name = main.zip_package(project, cwd, requirements)
+    main.upload_zip(bucket, zip_file, zip_file_name)
 
     role_name = job_id + '-default-role'
 
@@ -77,7 +73,7 @@ def run(project):
 
     ec2_settings['LaunchSpecification']['IamInstanceProfile'] = {'Name': job_id + '-default-role'}
 
-    main.request_spot_instance(job_id, ec2_settings)
+    main.request_spot_instances(job_id, ec2_settings)
 
 
 @cli.command('undeploy')

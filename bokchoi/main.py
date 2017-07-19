@@ -1,6 +1,7 @@
 
 from time import sleep
 import hashlib
+from io import BytesIO
 import json
 import os
 import zipfile
@@ -129,29 +130,30 @@ def load_settings():
         return json.load(f_setting)
 
 
-def zip_package(name, requirements=None):
-    cwd = os.getcwd()
+def zip_package(name, dir, requirements=None):
+
+    file_object = BytesIO()
+
     zip_name = 'bokchoi-' + name + '.zip'
-    rootlen = len(cwd) + 1
+    rootlen = len(dir) + 1
 
-    with zipfile.ZipFile('\\'.join((cwd, zip_name)), 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for base, _, files in os.walk(cwd):
+    with zipfile.ZipFile(file_object, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for base, _, files in os.walk(dir):
             for file_name in files:
-                if file_name.endswith('.zip'):
-                    continue
-
                 fn = os.path.join(base, file_name)
                 zip_file.write(fn, fn[rootlen:])
 
         if requirements:
             zip_file.writestr('requirements.txt', '\n'.join(requirements))
 
-    return zip_name
+    file_object.seek(0)
+
+    return file_object, zip_name
 
 
-def upload_zip(zip_file_name, bucket):
+def upload_zip(bucket, zip_file, zip_file_name):
     s3 = session.resource('s3')
-    s3.Bucket(bucket).upload_file(zip_file_name, zip_file_name)
+    s3.Bucket(bucket).put_object(Body=zip_file, Key=zip_file_name)
 
 
 def create_bucket(region, job_id):
@@ -219,7 +221,7 @@ def create_job_id(project):
     return 'bokchoi-' + hashlib.sha1((aws_account_id + project).encode()).hexdigest()
 
 
-def request_spot_instance(job_id, settings):
+def request_spot_instances(job_id, settings):
 
     response = ec2.request_spot_instances(**settings)
 
@@ -382,10 +384,11 @@ def create_lambda_scheduler(job_id, project, schedule, requirements=None):
 
     from . import scheduler
 
-    cwd = os.getcwd()
-    zip_name = 'bokchoi-scheduler.zip'
+    file_object = BytesIO()
 
-    with zipfile.ZipFile('\\'.join((cwd, zip_name)), 'w', zipfile.ZIP_DEFLATED) as zip_file:
+    cwd = os.getcwd()
+
+    with zipfile.ZipFile(file_object, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.write(scheduler.__file__, 'scheduler.py')
         zip_file.write(__file__, 'main.py')
         zip_file.write('\\'.join((cwd, 'bokchoi_settings.json')), 'bokchoi_settings.json')
@@ -393,10 +396,12 @@ def create_lambda_scheduler(job_id, project, schedule, requirements=None):
         if requirements:
             zip_file.writestr('requirements.txt', '\n'.join(requirements))
 
-    bucket_name = job_id
-    zip_file_name = 'bokchoi-scheduler.zip'
+    file_object.seek(0)
 
-    upload_zip(zip_file_name, bucket_name)
+    bucket_name = job_id
+
+    zip_file_name = 'bokchoi-scheduler.zip'
+    upload_zip(bucket_name, file_object, zip_file_name)
 
     policy_document = SCHEDULER_POLICY
     policy_name = job_id + '-scheduler-policy'
