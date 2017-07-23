@@ -15,14 +15,13 @@ def cli():
 @click.argument('project')
 def deploy(project):
 
-    settings = main.load_settings()
+    settings = main.load_settings(project)
 
-    job = settings[project]
     job_id = main.create_job_id(project)
 
-    requirements = job.get('Requirements', None)
+    requirements = settings.get('Requirements', None)
 
-    bucket = main.create_bucket(job['Region'], job_id)
+    bucket = main.create_bucket(settings['Region'], job_id)
     click.secho('Created bucket: ' + bucket, fg='green')
 
     cwd = os.getcwd()
@@ -38,9 +37,9 @@ def deploy(project):
     default_policy_arn = main.create_policy(policy_name, policy_document)
     policy_arns.append(default_policy_arn)
 
-    if job.get('CustomPolicy'):
-        print('Creating custom policy')
-        custom_policy = job['CustomPolicy']
+    if settings.get('CustomPolicy'):
+        click.echo('Creating custom policy')
+        custom_policy = settings['CustomPolicy']
 
         policy_name = job_id + '-custom-policy'
         custom_policy_arn = main.create_policy(policy_name, custom_policy)
@@ -49,25 +48,25 @@ def deploy(project):
     main.create_role(role_name, main.TRUST_POLICY, *policy_arns)
     main.create_instance_profile(role_name, role_name)
 
-    if job.get('Schedule'):
+    if settings.get('Schedule'):
 
-        schedule = job.get('Schedule')
+        schedule = settings.get('Schedule')
         main.create_lambda_scheduler(job_id, project, schedule, requirements)
 
 
 @cli.command('run')
 @click.argument('project')
 def run(project):
-    settings = main.load_settings()
-    job = settings[project]
+    settings = main.load_settings(project)
+
     job_id = main.create_job_id(project)
 
     bucket_name = job_id
     zip_file_name = 'bokchoi-{}.zip'.format(project)
 
-    ec2_settings = job['EC2']
+    ec2_settings = settings['EC2']
 
-    app, entry = job['EntryPoint'].split('.')
+    app, entry = settings['EntryPoint'].split('.')
     user_data = main.USER_DATA.format(bucket=bucket_name, package=zip_file_name, app=app, entry=entry)
     ec2_settings['LaunchSpecification']['UserData'] = base64.b64encode(user_data.encode('ascii')).decode('ascii')
 

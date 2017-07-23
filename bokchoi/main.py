@@ -11,7 +11,19 @@ from botocore.exceptions import ClientError
 
 
 session = boto3.Session()
-ec2 = session.client('ec2')
+
+ec2_client = session.client('ec2')
+ec2_resource = session.resource('ec2')
+
+iam_client = session.client('iam')
+iam_resource = session.resource('iam')
+
+s3_client = session.client('s3')
+s3_resource = session.resource('s3')
+
+lambda_client = session.client('lambda')
+
+events_client = session.client('events')
 
 USER_DATA = """#!/bin/bash
 
@@ -125,9 +137,15 @@ EVENT_TRUST_POLICY = """{
 }"""
 
 
-def load_settings():
-    with open('bokchoi_settings.json', 'r') as f_setting:
-        return json.load(f_setting)
+def load_settings(project_name):
+    with open('bokchoi_settings.json', 'r') as settings_file:
+
+        settings = json.load(settings_file)
+
+        try:
+            return settings[project_name]
+        except KeyError:
+            raise KeyError('No config found for {} in bokchoi_settings'.format(project_name))
 
 
 def zip_package(name, dir, requirements=None):
@@ -152,29 +170,27 @@ def zip_package(name, dir, requirements=None):
 
 
 def upload_zip(bucket, zip_file, zip_file_name):
-    s3 = session.resource('s3')
-    s3.Bucket(bucket).put_object(Body=zip_file, Key=zip_file_name)
+    s3_resource.Bucket(bucket).put_object(Body=zip_file, Key=zip_file_name)
 
 
 def create_bucket(region, job_id):
 
     bucket_name = job_id
 
-    s3 = session.resource('s3')
-    s3.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': region})
+    s3_resource.create_bucket(Bucket=bucket_name
+                              , CreateBucketConfiguration={'LocationConstraint': region})
 
     return bucket_name
 
 
 def create_instance_profile(profile_name, role_name=None):
-    iam = session.client('iam')
 
-    create_instance_profile_response = iam.create_instance_profile(
+    create_instance_profile_response = iam_client.create_instance_profile(
         InstanceProfileName=profile_name
     )
 
     if role_name:
-        iam.add_role_to_instance_profile(
+        iam_client.add_role_to_instance_profile(
             InstanceProfileName=profile_name,
             RoleName=role_name
         )
@@ -183,9 +199,8 @@ def create_instance_profile(profile_name, role_name=None):
 
 
 def create_policy(name, document):
-    iam = boto3.client('iam')
 
-    response = iam.create_policy(
+    response = iam_client.create_policy(
         PolicyName=name,
         PolicyDocument=document
     )
@@ -194,15 +209,14 @@ def create_policy(name, document):
 
 
 def create_role(role_name, trust_policy, *policy_arns):
-    iam = boto3.client('iam')
 
-    create_role_response = iam.create_role(
+    create_role_response = iam_client.create_role(
         RoleName=role_name,
         AssumeRolePolicyDocument=trust_policy
     )
 
     for policy_arn in policy_arns:
-        attach_role_policy_response = iam.attach_role_policy(
+        attach_role_policy_response = iam_client.attach_role_policy(
             RoleName=role_name,
             PolicyArn=policy_arn
         )
@@ -213,7 +227,8 @@ def create_role(role_name, trust_policy, *policy_arns):
 
 
 def get_aws_account_id():
-    return ec2.describe_security_groups(GroupNames=['Default'])['SecurityGroups'][0]['OwnerId']
+    response = ec2_client.describe_security_groups(GroupNames=['Default'])
+    return response['SecurityGroups'][0]['OwnerId']
 
 
 def create_job_id(project):
@@ -223,22 +238,22 @@ def create_job_id(project):
 
 def request_spot_instances(job_id, settings):
 
-    response = ec2.request_spot_instances(**settings)
+    response = ec2_client.request_spot_instances(**settings)
 
     print(response)
 
     spot_request_id = response['SpotInstanceRequests'][0]['SpotInstanceRequestId']
 
-    waiter = ec2.get_waiter('spot_instance_request_fulfilled')
+    waiter = ec2_client.get_waiter('spot_instance_request_fulfilled')
     waiter.wait(SpotInstanceRequestIds=[spot_request_id])
 
-    tag = ec2.create_tags(Resources=[spot_request_id]
-                          , Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
+    tag = ec2_client.create_tags(Resources=[spot_request_id]
+                                 , Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
 
-    response = ec2.describe_spot_instance_requests(SpotInstanceRequestIds=[spot_request_id])
+    response = ec2_client.describe_spot_instance_requests(SpotInstanceRequestIds=[spot_request_id])
     instance_ids = [request['InstanceId'] for request in response['SpotInstanceRequests']]
 
-    ec2.create_tags(Resources=instance_ids, Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
+    ec2_client.create_tags(Resources=instance_ids, Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
 
     print(tag)
 
@@ -247,12 +262,12 @@ def cancel_spot_request(job_id):
     print('\nCancelling spot request')
     filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(job_id)]}
                , {'Name': 'state', 'Values': ['open', 'active']}]
-    response = ec2.describe_spot_instance_requests(Filters=filters)
+    response = ec2_client.describe_spot_instance_requests(Filters=filters)
 
     spot_request_ids = [request['SpotInstanceRequestId'] for request in response['SpotInstanceRequests']]
 
     try:
-        ec2.cancel_spot_instance_requests(SpotInstanceRequestIds=spot_request_ids)
+        ec2_client.cancel_spot_instance_requests(SpotInstanceRequestIds=spot_request_ids)
     except ClientError as e:
         if e.response['Error']['Code'] == 'InvalidParameterCombination':
             print('No spot requests to cancel')
@@ -265,14 +280,13 @@ def cancel_spot_request(job_id):
 def terminate_instances(job_id):
     print('\nTerminating instances')
     filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(job_id)]}]
-    ec2_resource = session.resource('ec2')
     ec2_resource.instances.filter(Filters=filters).terminate()
     print('Instances terminated')
 
 
 def delete_bucket(job_id):
     print('\nDelete Bucket')
-    s3_resource = session.resource('s3')
+
     bucket = s3_resource.Bucket(job_id)
 
     try:
@@ -286,8 +300,7 @@ def delete_bucket(job_id):
 
 
 def get_instance_profiles(job_id):
-    iam = session.resource('iam')
-    for instance_profile in iam.instance_profiles.all():
+    for instance_profile in iam_resource.instance_profiles.all():
         if job_id in instance_profile.instance_profile_name:
             yield instance_profile
 
@@ -317,8 +330,7 @@ def delete_instance_profile(instance_profile):
 
 
 def get_roles(job_id):
-    iam = session.resource('iam')
-    for role in iam.roles.all():
+    for role in iam_resource.roles.all():
         if job_id in role.role_name:
             yield role
 
@@ -349,8 +361,7 @@ def delete_role(role):
 
 
 def get_policies(job_id):
-    iam = session.resource('iam')
-    for policy in iam.policies.filter(Scope='Local'):
+    for policy in iam_resource.policies.filter(Scope='Local'):
         if job_id in policy.policy_name:
             yield policy
 
@@ -392,7 +403,7 @@ def create_lambda_scheduler(job_id, project, schedule, requirements=None):
         zip_file.write(scheduler.__file__, 'scheduler.py')
         zip_file.write(__file__, 'main.py')
         zip_file.write('\\'.join((cwd, 'bokchoi_settings.json')), 'bokchoi_settings.json')
-    
+
         if requirements:
             zip_file.writestr('requirements.txt', '\n'.join(requirements))
 
@@ -410,23 +421,21 @@ def create_lambda_scheduler(job_id, project, schedule, requirements=None):
     role_name = job_id + '-scheduler-role'
     response = create_role(role_name, SCHEDULER_TRUST_POLICY, policy_arn)
 
-    lmbda = session.client('lambda')
-    print(schedule)
     sleep(40)
+
+    print(schedule)
 
     # AWS has some specific demands on cron schedule:
     # http://docs.aws.amazon.com/lambda/latest/dg/tutorial-scheduled-events-schedule-expressions.html
-    create_function_response = lmbda.create_function(FunctionName=job_id + '-scheduler'
-                                                     , Runtime='python3.6'
-                                                     , Handler='scheduler.run'
-                                                     , Role=response['Arn']
-                                                     , Code={'S3Bucket': bucket_name
-                                                             , 'S3Key': zip_file_name}
-                                                     , Timeout=30
-                                                     , Environment={'Variables': {'project': project}}
-                                                     , Tags={'bokchoi-id': job_id})
-
-    events = boto3.client('events')
+    create_function_response = lambda_client.create_function(FunctionName=job_id + '-scheduler'
+                                                             , Runtime='python3.6'
+                                                             , Handler='scheduler.run'
+                                                             , Role=response['Arn']
+                                                             , Code={'S3Bucket': bucket_name
+                                                                     , 'S3Key': zip_file_name}
+                                                             , Timeout=30
+                                                             , Environment={'Variables': {'project': project}}
+                                                             , Tags={'bokchoi-id': job_id})
 
     policy_document = EVENT_POLICY
     policy_name = job_id + '-event-policy'
@@ -438,15 +447,15 @@ def create_lambda_scheduler(job_id, project, schedule, requirements=None):
     sleep(40)
 
     rule_name = job_id + '-schedule-event'
-    events.put_rule(Name=rule_name
-                    , ScheduleExpression='cron({})'.format(schedule)
-                    , State='ENABLED'
-                    , RoleArn=response['Arn'])
+    events_client.put_rule(Name=rule_name
+                           , ScheduleExpression=schedule
+                           , State='ENABLED'
+                           , RoleArn=response['Arn'])
 
-    events.put_targets(Rule=rule_name
-                       , Targets=[{'Arn': create_function_response['FunctionArn'], 'Id': '0'}])
+    events_client.put_targets(Rule=rule_name
+                              , Targets=[{'Arn': create_function_response['FunctionArn'], 'Id': '0'}])
 
-    response = lmbda.add_permission(
+    response = lambda_client.add_permission(
         FunctionName=job_id + '-scheduler',
         StatementId='0',
         Action='lambda:InvokeFunction',
@@ -455,10 +464,9 @@ def create_lambda_scheduler(job_id, project, schedule, requirements=None):
 
 
 def delete_scheduler_lambda(job_id):
-    lmbda = boto3.client('lambda')
 
     try:
-        lmbda.delete_function(FunctionName=job_id + '-scheduler')
+        lambda_client.delete_function(FunctionName=job_id + '-scheduler')
     except ClientError as e:
         if e.response['Error']['Code'] == 'ResourceNotFoundException':
             print('Function does not exist')
@@ -468,11 +476,9 @@ def delete_scheduler_lambda(job_id):
 
 def delete_cloudwatch_rule(rule_name):
 
-    events = boto3.client('events')
-
     try:
-        events.remove_targets(Rule=rule_name
-                              , Ids=['0'])
+        events_client.remove_targets(Rule=rule_name
+                                     , Ids=['0'])
     except ClientError as e:
         if e.response['Error']['Code'] == 'ResourceNotFoundException':
             print('No targets to remove from rule')
@@ -480,7 +486,7 @@ def delete_cloudwatch_rule(rule_name):
             raise e
 
     try:
-        events.delete_rule(Name=rule_name)
+        events_client.delete_rule(Name=rule_name)
     except ClientError as e:
         if e.response['Error']['Code'] == 'ResourceNotFoundException':
             print('Cloudwatch rule does not exist')
