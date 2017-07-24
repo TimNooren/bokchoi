@@ -9,7 +9,6 @@ import zipfile
 import boto3
 from botocore.exceptions import ClientError
 
-
 session = boto3.Session()
 
 ec2_client = session.client('ec2')
@@ -141,15 +140,14 @@ EVENT_TRUST_POLICY = """{
 
 def retry(func, **kwargs):
 
-    for i in range(60):
+    for _ in range(60):
         try:
             response = func(**kwargs)
-            print('Retry successful after {} tries'.format(i + 1))
             return response
-        except Exception as e:
+        except ClientError as e:
             sleep(1)
-    else:
-        raise e
+
+    raise e
 
 
 def load_settings(project_name):
@@ -230,7 +228,7 @@ def create_role(role_name, trust_policy, *policy_arns):
     )
 
     for policy_arn in policy_arns:
-        attach_role_policy_response = iam_client.attach_role_policy(
+        iam_client.attach_role_policy(
             RoleName=role_name,
             PolicyArn=policy_arn
         )
@@ -257,8 +255,8 @@ def request_spot_instances(job_id, settings):
     waiter = ec2_client.get_waiter('spot_instance_request_fulfilled')
     waiter.wait(SpotInstanceRequestIds=[spot_request_id])
 
-    tag = ec2_client.create_tags(Resources=[spot_request_id]
-                                 , Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
+    ec2_client.create_tags(Resources=[spot_request_id]
+                           , Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
 
     response = ec2_client.describe_spot_instance_requests(SpotInstanceRequestIds=[spot_request_id])
     instance_ids = [request['InstanceId'] for request in response['SpotInstanceRequests']]
@@ -350,7 +348,7 @@ def delete_role(role):
 
     try:
         for policy in role.attached_policies.all():
-            policy.detach_role(RoleName=role.role_name)
+            policy.detach_role(RoleName=role_name)
     except ClientError as e:
         if e.response['Error']['Code'] == 'NoSuchEntity':
             print('No policies to detach')
@@ -399,7 +397,7 @@ def delete_policy(policy):
     print('Successfully deleted Policy:', policy_name)
 
 
-def create_lambda_scheduler(job_id, project, schedule, requirements=None):
+def create_scheduler(job_id, project, schedule, requirements=None):
 
     from . import scheduler
 
@@ -459,7 +457,7 @@ def create_lambda_scheduler(job_id, project, schedule, requirements=None):
     events_client.put_targets(Rule=rule_name
                               , Targets=[{'Arn': create_function_response['FunctionArn'], 'Id': '0'}])
 
-    response = lambda_client.add_permission(
+    lambda_client.add_permission(
         FunctionName=job_id + '-scheduler',
         StatementId='0',
         Action='lambda:InvokeFunction',
@@ -467,7 +465,7 @@ def create_lambda_scheduler(job_id, project, schedule, requirements=None):
     )
 
 
-def delete_scheduler_lambda(job_id):
+def delete_scheduler(job_id):
 
     try:
         lambda_client.delete_function(FunctionName=job_id + '-scheduler')

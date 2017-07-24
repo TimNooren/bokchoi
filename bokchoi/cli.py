@@ -33,17 +33,17 @@ def deploy(project):
 
     policy_arns = []
 
-    policy_document = main.DEFAULT_POLICY.format(bucket=bucket)
-    policy_name = job_id + '-default-policy'
-    default_policy_arn = main.create_policy(policy_name, policy_document)
+    default_policy_name = job_id + '-default-policy'
+    default_policy_document = main.DEFAULT_POLICY.format(bucket=bucket)
+    default_policy_arn = main.create_policy(default_policy_name, default_policy_document)
     policy_arns.append(default_policy_arn)
 
     if settings.get('CustomPolicy'):
         click.echo('Creating custom policy')
-        custom_policy = settings['CustomPolicy']
 
-        policy_name = job_id + '-custom-policy'
-        custom_policy_arn = main.create_policy(policy_name, custom_policy)
+        custom_policy_name = job_id + '-custom-policy'
+        custom_policy_document = settings['CustomPolicy']
+        custom_policy_arn = main.create_policy(custom_policy_name, custom_policy_document)
         policy_arns.append(custom_policy_arn)
 
     main.create_role(role_name, main.TRUST_POLICY, *policy_arns)
@@ -52,14 +52,13 @@ def deploy(project):
     if settings.get('Schedule'):
         schedule = settings['Schedule']
         click.echo('Scheduling job using ' + schedule)
-        main.create_lambda_scheduler(job_id, project, schedule, requirements)
+        main.create_scheduler(job_id, project, schedule, requirements)
 
 
 @cli.command('run')
 @click.argument('project')
 def run(project):
     settings = main.load_settings(project)
-
     job_id = main.create_job_id(project)
 
     bucket_name = job_id
@@ -96,7 +95,7 @@ def undeploy(project):
     for role in main.get_roles(job_id):
         main.delete_role(role)
 
-    main.delete_scheduler_lambda(job_id)
+    main.delete_scheduler(job_id)
 
     rule_name = job_id + '-schedule-event'
     main.delete_cloudwatch_rule(rule_name)
