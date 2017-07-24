@@ -24,8 +24,9 @@ def deploy(project):
     bucket = main.create_bucket(settings['Region'], job_id)
     click.secho('Created bucket: ' + bucket, fg='green')
 
+    zip_file_name = 'bokchoi-' + project + '.zip'
     cwd = os.getcwd()
-    zip_file, zip_file_name = main.zip_package(project, cwd, requirements)
+    zip_file = main.zip_package(cwd, requirements)
     main.upload_zip(bucket, zip_file, zip_file_name)
 
     role_name = job_id + '-default-role'
@@ -49,8 +50,8 @@ def deploy(project):
     main.create_instance_profile(role_name, role_name)
 
     if settings.get('Schedule'):
-
-        schedule = settings.get('Schedule')
+        schedule = settings['Schedule']
+        click.echo('Scheduling job using ' + schedule)
         main.create_lambda_scheduler(job_id, project, schedule, requirements)
 
 

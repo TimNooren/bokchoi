@@ -25,4 +25,4 @@ def run(event, context):
 
     ec2_settings['LaunchSpecification']['IamInstanceProfile'] = {'Name': job_id + '-default-role'}
 
-    main.request_spot_instance(job_id, ec2_settings)
+    main.request_spot_instances(job_id, ec2_settings)

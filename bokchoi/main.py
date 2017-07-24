@@ -44,6 +44,7 @@ curl -sS https://bootstrap.pypa.io/get-pip.py | sudo python3
 # Run app
 cd /tmp
 python3 -c "import {app}; {app}.{entry}();"
+aws s3 cp /var/log/cloud-init-output.log s3://{bucket}/cloud-init-output.log
 shutdown -h now
 """
 
@@ -67,7 +68,8 @@ DEFAULT_POLICY = """{{
     {{
       "Action": [
         "s3:Get*",
-        "s3:List*"
+        "s3:List*",
+        "s3:Put*"
       ],
       "Effect": "Allow",
       "Resource": "arn:aws:s3:::{bucket}/*"
@@ -137,6 +139,19 @@ EVENT_TRUST_POLICY = """{
 }"""
 
 
+def retry(func, **kwargs):
+
+    for i in range(60):
+        try:
+            response = func(**kwargs)
+            print('Retry successful after {} tries'.format(i + 1))
+            return response
+        except Exception as e:
+            sleep(1)
+    else:
+        raise e
+
+
 def load_settings(project_name):
     with open('bokchoi_settings.json', 'r') as settings_file:
 
@@ -148,15 +163,14 @@ def load_settings(project_name):
             raise KeyError('No config found for {} in bokchoi_settings'.format(project_name))
 
 
-def zip_package(name, dir, requirements=None):
+def zip_package(path, requirements=None):
 
     file_object = BytesIO()
 
-    zip_name = 'bokchoi-' + name + '.zip'
-    rootlen = len(dir) + 1
+    rootlen = len(path) + 1
 
     with zipfile.ZipFile(file_object, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for base, _, files in os.walk(dir):
+        for base, _, files in os.walk(path):
             for file_name in files:
                 fn = os.path.join(base, file_name)
                 zip_file.write(fn, fn[rootlen:])
@@ -166,7 +180,7 @@ def zip_package(name, dir, requirements=None):
 
     file_object.seek(0)
 
-    return file_object, zip_name
+    return file_object
 
 
 def upload_zip(bucket, zip_file, zip_file_name):
@@ -221,8 +235,6 @@ def create_role(role_name, trust_policy, *policy_arns):
             PolicyArn=policy_arn
         )
 
-        print(attach_role_policy_response)
-
     return create_role_response['Role']
 
 
@@ -240,8 +252,6 @@ def request_spot_instances(job_id, settings):
 
     response = ec2_client.request_spot_instances(**settings)
 
-    print(response)
-
     spot_request_id = response['SpotInstanceRequests'][0]['SpotInstanceRequestId']
 
     waiter = ec2_client.get_waiter('spot_instance_request_fulfilled')
@@ -254,8 +264,6 @@ def request_spot_instances(job_id, settings):
     instance_ids = [request['InstanceId'] for request in response['SpotInstanceRequests']]
 
     ec2_client.create_tags(Resources=instance_ids, Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
-
-    print(tag)
 
 
 def cancel_spot_request(job_id):
@@ -421,21 +429,18 @@ def create_lambda_scheduler(job_id, project, schedule, requirements=None):
     role_name = job_id + '-scheduler-role'
     response = create_role(role_name, SCHEDULER_TRUST_POLICY, policy_arn)
 
-    sleep(40)
-
-    print(schedule)
-
     # AWS has some specific demands on cron schedule:
     # http://docs.aws.amazon.com/lambda/latest/dg/tutorial-scheduled-events-schedule-expressions.html
-    create_function_response = lambda_client.create_function(FunctionName=job_id + '-scheduler'
-                                                             , Runtime='python3.6'
-                                                             , Handler='scheduler.run'
-                                                             , Role=response['Arn']
-                                                             , Code={'S3Bucket': bucket_name
-                                                                     , 'S3Key': zip_file_name}
-                                                             , Timeout=30
-                                                             , Environment={'Variables': {'project': project}}
-                                                             , Tags={'bokchoi-id': job_id})
+    create_function_response = retry(lambda_client.create_function
+                                     , FunctionName=job_id + '-scheduler'
+                                     , Runtime='python3.6'
+                                     , Handler='scheduler.run'
+                                     , Role=response['Arn']
+                                     , Code={'S3Bucket': bucket_name
+                                             , 'S3Key': zip_file_name}
+                                     , Timeout=30
+                                     , Environment={'Variables': {'project': project}}
+                                     , Tags={'bokchoi-id': job_id})
 
     policy_document = EVENT_POLICY
     policy_name = job_id + '-event-policy'
@@ -444,13 +449,12 @@ def create_lambda_scheduler(job_id, project, schedule, requirements=None):
     role_name = job_id + '-event-role'
     response = create_role(role_name, EVENT_TRUST_POLICY, policy_arn)
 
-    sleep(40)
-
     rule_name = job_id + '-schedule-event'
-    events_client.put_rule(Name=rule_name
-                           , ScheduleExpression=schedule
-                           , State='ENABLED'
-                           , RoleArn=response['Arn'])
+    retry(events_client.put_rule
+          , Name=rule_name
+          , ScheduleExpression=schedule
+          , State='ENABLED'
+          , RoleArn=response['Arn'])
 
     events_client.put_targets(Rule=rule_name
                               , Targets=[{'Arn': create_function_response['FunctionArn'], 'Id': '0'}])
