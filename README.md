@@ -6,10 +6,10 @@ Bokchoi simplifies running Python batch jobs on AWS spot instances. Bokchoi hand
 
 ### Installing
 
-Installing bokchoi (still on testpypi only):
+To install bokchoi:
 
 ```
-pip install --extra-index-url https://testpypi.python.org/pypi bokchoi
+pip install bokchoi
 ```
 
 ### Settings
@@ -30,7 +30,7 @@ This file should contain the following:
 
 ```json
 {
-  "job_name": {
+  "<yourjobname>": {
     "EntryPoint": "deep_nn.main",
     "Region": "us-east-1",
     "Requirements": [
