@@ -2,13 +2,13 @@
 """
 Class which can be used to deploy and run EMR jobs
 """
-import sys
+
 import os
-from botocore.exceptions import ClientError
 import boto3
 import click
 
 from . import helper
+
 
 class EMR(object):
     """Create EMR object which can be used to schedule jobs"""
@@ -17,7 +17,7 @@ class EMR(object):
         self.settings = settings
         self.project_name = project
         self.job_id = helper.create_job_id(project)
-        self.bucket = create_bucket(settings, self.job_id)
+        self.bucket = helper.create_bucket(settings, self.job_id)
 
     def deploy(self):
         """Zip package and deploy to S3 so it can be used by EMR"""
@@ -166,19 +166,3 @@ def schedule(settings, job_id, project, requirements):
     task = settings['Schedule']
     click.echo('Scheduling job using ' + task)
     helper.create_scheduler(job_id, project, task, requirements)
-
-
-# TODO: move to aws_utils
-def create_bucket(settings, job_id):
-    """Create new bucket or use existing one"""
-    try:
-        bucket = helper.create_bucket(settings['Region'], job_id)
-    except ClientError as exception:
-        if exception.response['Error']['Code'] == 'BucketAlreadyOwnedByYou':
-            click.secho('Bucket already exists and owned by you, continuing', fg='green')
-            bucket = job_id
-        else:
-            click.secho('Error encountered during bucket creation: ' + str(exception), fg='red')
-            sys.exit(1)
-
-    return bucket

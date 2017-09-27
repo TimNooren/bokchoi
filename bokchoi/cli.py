@@ -18,13 +18,13 @@ def cli(ctx, project):
     settings = helper.load_settings(project)
 
     # instantiate object based on given platform parameter in settings file
-    ctx.obj = {}
-    types = {'EC2': EC2(project, settings), 'EMR': EMR(project, settings)}
-    ctx.obj = types.get(settings.get('Platform'))
+    platforms = {'EC2': EC2, 'EMR': EMR}
+    ctx.obj = platforms.get(settings['Platform'])(project, settings)
 
-    if not types:
+    if not ctx.obj:
         click.echo("Choose a supported instance type option..")
         sys.exit(1)
+
 
 @cli.command('run')
 @click.pass_obj
@@ -33,12 +33,14 @@ def run(ctx):
     ctx.run()
     click.secho('Running application', fg='green')
 
+
 @cli.command('deploy')
 @click.pass_obj
 def deploy(ctx):
     """Default deploy command"""
     ctx.deploy()
     click.secho('Deployed', fg='green')
+
 
 @cli.command('undeploy')
 @click.pass_obj
