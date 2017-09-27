@@ -4,3 +4,4 @@ dist/
 *.zip
 .pylintrc
 .pypirc
+__pycache__/

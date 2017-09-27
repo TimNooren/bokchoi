@@ -1,23 +1,47 @@
-
+"""
+Information about the class
+"""
 import os
+import sys
 import base64
+from enum import Enum
 import click
 
-from . import main
+from . import helper
+from .ec2 import EC2
+from .emr import EMR
 
 
 @click.group()
-def cli():
-    pass
+@click.argument('project')
+@click.pass_context
+def cli(ctx, project):
+    settings = helper.load_settings(project)
+    job_id = helper.create_job_id(project)
+
+    types = {'EC2': EC2(), 'EMR': EMR(job_id)}
+    ctx.obj = types.get(settings.get('Platform'))
+
+    if not types:
+        click.echo("Choose a supported instance type option..")
+        sys.exit(1)
+
+@cli.command('run')
+@click.pass_obj
+def run(ctx):
+    ctx.run()
+
+@cli.command('deploy')
+@click.pass_obj
+def deploy(ctx):
+    click.echo('Dropped the database')
+    ctx.deploy()
 
 
+"""
 @cli.command('deploy')
 @click.argument('project')
 def deploy(project):
-
-    settings = main.load_settings(project)
-
-    job_id = main.create_job_id(project)
 
     requirements = settings.get('Requirements', None)
 
@@ -94,10 +118,11 @@ def undeploy(project):
 
     for role in main.get_roles(job_id):
         main.delete_role(role)
-
+ 
     main.delete_scheduler(job_id)
 
     rule_name = job_id + '-schedule-event'
     main.delete_cloudwatch_rule(rule_name)
 
     click.secho('Undeployed', fg='red')
+"""
