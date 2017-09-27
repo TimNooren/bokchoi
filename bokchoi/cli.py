@@ -4,7 +4,6 @@ Information about the class
 import os
 import sys
 import base64
-from enum import Enum
 import click
 
 from . import helper
@@ -16,11 +15,13 @@ from .emr import EMR
 @click.argument('project')
 @click.pass_context
 def cli(ctx, project):
+    """Starting point for cli commands"""
     settings = helper.load_settings(project)
     job_id = helper.create_job_id(project)
 
-    types = {'EC2': EC2(), 'EMR': EMR(job_id)}
-    ctx.obj = types.get(settings.get('Platform'))
+    ctx.obj = {}
+    types = {'EC2': EC2(settings), 'EMR': EMR(settings)}
+    ctx.ob = types.get(settings.get('Platform'))
 
     if not types:
         click.echo("Choose a supported instance type option..")
@@ -29,12 +30,13 @@ def cli(ctx, project):
 @cli.command('run')
 @click.pass_obj
 def run(ctx):
+    """Default run command"""
     ctx.run()
 
 @cli.command('deploy')
 @click.pass_obj
 def deploy(ctx):
-    click.echo('Dropped the database')
+    """Default deploy command"""
     ctx.deploy()
 
 

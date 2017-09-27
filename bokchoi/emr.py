@@ -13,11 +13,12 @@ S3_BUCKET = 'bijenkorf-personalization-layer'
 
 class EMR(object):
     """Create EMR object which can be used to schedule jobs"""
-    def __init__(self, job, package_path, instance_type, num_instances):
+    def __init__(self, settings):
+        self.settings = settings
         self.emr_client = boto3.client('emr')
         self.s3_client = boto3.resource('s3')
         self.job_name = job
-        self.package_name = helper.zip_package(package_path)
+        self.package_name = helper.zip_package("package_path")
         self.type = instance_type
         self.instances = num_instances
 

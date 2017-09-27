@@ -10,7 +10,7 @@ from . import helper
 
 class EC2(object):
     """Create EC2 object which can be used to schedule jobs"""
-    def __init__(self):
+    def __init__(self, settings):
         pass
 
     def deploy(self):
