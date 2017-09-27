@@ -10,7 +10,7 @@ PROJECT = os.environ.get('project')
 
 def run(event, context):
 
-    import .helper
+    from . import helper
 
     settings = helper.load_settings(PROJECT)
 

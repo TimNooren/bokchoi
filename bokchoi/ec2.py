@@ -22,6 +22,8 @@ class EC2(object):
         self.project_id = helper.create_job_id(project)
         self.package_name = 'bokchoi-' + self.project_name + '.zip'
 
+        self.schedule = settings.get('Schedule')
+
     def deploy(self):
         """Zip package and deploy to S3"""
 
@@ -50,6 +52,10 @@ class EC2(object):
         role_name = self.project_id + '-default-role'
         helper.create_role(role_name, helper.TRUST_POLICY, *policy_arns)
         helper.create_instance_profile(role_name, role_name)
+
+        if self.schedule:
+            click.echo('Scheduling job using ' + self.schedule)
+            helper.create_scheduler(self.project_id, self.project_name, self.schedule, self.requirements)
 
     def undeploy(self):
         """Deletes all policies, users, and instances permanently"""
