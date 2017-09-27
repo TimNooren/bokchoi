@@ -5,3 +5,4 @@ dist/
 .pylintrc
 .pypirc
 __pycache__/
+bokchoi_settings.json

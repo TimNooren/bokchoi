@@ -2,30 +2,43 @@
 """
 Class which can be used to deploy and run EMR jobs
 """
+import sys
+import os
+from botocore.exceptions import ClientError
 import boto3
 import click
 
 from . import helper
 
-# define S3 settings
-S3_BUCKET = 'bijenkorf-personalization-layer'
-
-
 class EMR(object):
     """Create EMR object which can be used to schedule jobs"""
-    def __init__(self, settings):
-        self.settings = settings
+    def __init__(self, project, settings):
         self.emr_client = boto3.client('emr')
-        self.s3_client = boto3.resource('s3')
-        self.job_name = job
-        self.package_name = helper.zip_package("package_path")
-        self.type = instance_type
-        self.instances = num_instances
+        self.settings = settings
+        self.project_name = project
+        self.job_id = helper.create_job_id(project)
+        self.bucket = create_bucket(settings, self.job_id)
 
     def deploy(self):
         """Zip package and deploy to S3 so it can be used by EMR"""
-        self.s3_client.upload_file(self.package_name, S3_BUCKET, self.package_name)
-        self.s3_client.upload_file('requirements.txt', S3_BUCKET, 'requirements.txt')
+
+        # create bucket for files
+        click.secho('Created bucket: ' + self.bucket, fg='green')
+
+        # define requirements
+        requirements = self.settings.get('Requirements', None)
+
+        # zip package and send to s3
+        zip_file = helper.zip_package(os.getcwd(), requirements)
+        helper.upload_zip(self.bucket, zip_file, self.job_id + '.zip')
+
+        # create policies and roles
+        policies = create_policies(self.settings, self.job_id, self.bucket)
+        create_roles(self.job_id, policies)
+
+        # schedule if needed
+        if self.settings.get('Schedule'):
+            schedule(self.settings, self.job_id, self.project_name, requirements)
 
     def undeploy(self):
         """Deletes all policies, users, and instances permanently"""
@@ -35,16 +48,19 @@ class EMR(object):
         """Create Spark cluster and run specified job
         Returns: emr job flow creation response
         """
-        s3_package_uri = 's3://{bucket}/{key}'.format(bucket=S3_BUCKET, key=self.package_name)
+        s3_package_uri = 's3://{bucket}/{key}'.format(bucket=self.bucket, key=self.job_id + '.zip')
+
+        instance_type = self.settings['EMR']['LaunchSpecification']['InstanceType']
+        instances = self.settings['EMR']['InstanceCount']
 
         return self.emr_client.run_job_flow(
-            Name=self.job_name,
-            LogUri=S3_BUCKET,
+            Name=self.job_id,
+            LogUri=self.job_id,
             ReleaseLabel='emr-5.8.0',
             Instances={
-                'MasterInstanceType': self.type,
-                'SlaveInstanceType': self.type,
-                'InstanceCount': self.instances,
+                'MasterInstanceType': instance_type,
+                'SlaveInstanceType': instance_type,
+                'InstanceCount': instances,
                 'KeepJobFlowAliveWhenNoSteps': False,
                 'TerminationProtected': False,
             },
@@ -91,3 +107,54 @@ class EMR(object):
             JobFlowRole='EMR_EC2_DefaultRole',
             ServiceRole='EMR_DefaultRole'
         )
+
+
+# TODO: refactor to policy class?
+def create_policies(settings, job_id, bucket):
+    """Create policies for EMR related tasks"""
+    policy_arns = []
+
+    # declare default policy settings
+    default_policy_name = job_id + '-default-policy'
+    default_policy_document = helper.DEFAULT_POLICY.format(bucket=bucket)
+    default_policy_arn = helper.create_policy(default_policy_name, default_policy_document)
+    policy_arns.append(default_policy_arn)
+
+    if settings.get('CustomPolicy'):
+        click.echo('Creating custom policy')
+
+        custom_policy_name = job_id + '-custom-policy'
+        custom_policy_document = settings['CustomPolicy']
+        custom_policy_arn = helper.create_policy(custom_policy_name, custom_policy_document)
+        policy_arns.append(custom_policy_arn)
+
+    return policy_arns
+
+# TODO: refactor to role class (together with policies)?
+def create_roles(job_id, policy_arns):
+    """Create roles for EMR jobs"""
+    role_name = job_id + '-default-role'
+    helper.create_role(role_name, helper.TRUST_POLICY, *policy_arns)
+    helper.create_instance_profile(role_name, role_name)
+
+
+def schedule(settings, job_id, project, requirements):
+    """Schedule task"""
+    task = settings['Schedule']
+    click.echo('Scheduling job using ' + task)
+    helper.create_scheduler(job_id, project, task, requirements)
+
+
+def create_bucket(settings, job_id):
+    """Create new bucket or use existing one"""
+    try:
+        bucket = helper.create_bucket(settings['Region'], job_id)
+    except ClientError as exception:
+        if exception.response['Error']['Code'] == 'BucketAlreadyOwnedByYou':
+            click.secho('Bucket already exists and owned by you, continuing', fg='green')
+            bucket = job_id
+        else:
+            click.secho('Error encountered during bucket creation: ' + str(exception), fg='red')
+            sys.exit(1)
+
+    return bucket
