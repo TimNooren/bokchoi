@@ -42,9 +42,27 @@ class EMR(object):
 
     def undeploy(self):
         """Deletes all policies, users, and instances permanently"""
-        raise NotImplementedError("Function not yet implemented for EMR")
+        # terminate emr cluster (not needed if job is not persistent)
+        #TODO: implement
 
-    def run(self, main_script):
+        # remove policies and roles
+        for pol in helper.get_policies(self.job_id):
+            helper.delete_policy(pol)
+
+        for role in helper.get_roles(self.job_id):
+            helper.delete_role(role)
+
+        for prof in helper.get_instance_profiles(self.job_id):
+            helper.delete_instance_profile(prof)
+
+        # remove s3 bucket
+        helper.delete_bucket(self.bucket)
+        helper.delete_scheduler(self.job_id)
+        helper.delete_cloudwatch_rule(self.job_id + '-schedule-event')
+
+
+
+    def run(self):
         """Create Spark cluster and run specified job
         Returns: emr job flow creation response
         """
@@ -52,6 +70,7 @@ class EMR(object):
 
         instance_type = self.settings['EMR']['LaunchSpecification']['InstanceType']
         instances = self.settings['EMR']['InstanceCount']
+        main_script = self.settings['EntryPoint']
 
         return self.emr_client.run_job_flow(
             Name=self.job_id,
@@ -64,11 +83,7 @@ class EMR(object):
                 'KeepJobFlowAliveWhenNoSteps': False,
                 'TerminationProtected': False,
             },
-            Applications=[
-                {
-                    'Name': 'Spark'
-                }
-            ],
+            Applications=[{'Name': 'Spark'}],
             BootstrapActions=[
                 {
                     'Name': 'Maximize Spark Default Config',
@@ -92,6 +107,14 @@ class EMR(object):
                     'HadoopJarStep': {
                         'Jar': 'command-runner.jar',
                         'Args': ['aws', 's3', 'cp', s3_package_uri, '/home/hadoop/']
+                    }
+                },
+                {
+                    'Name': 'setup - unzip files',
+                    'ActionOnFailure': 'CANCEL_AND_WAIT',
+                    'HadoopJarStep': {
+                        'Jar': 'command-runner.jar',
+                        'Args': ['unzip', self.job_id + '.zip']
                     }
                 },
                 {
@@ -145,6 +168,7 @@ def schedule(settings, job_id, project, requirements):
     helper.create_scheduler(job_id, project, task, requirements)
 
 
+# TODO: move to aws_utils
 def create_bucket(settings, job_id):
     """Create new bucket or use existing one"""
     try:

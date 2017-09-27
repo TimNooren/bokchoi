@@ -2,15 +2,12 @@
 """
 Class which can be used to deploy and run EC2 spot instances
 """
-import boto3
 import click
-
-from . import helper
 
 
 class EC2(object):
     """Create EC2 object which can be used to schedule jobs"""
-    def __init__(self, settings):
+    def __init__(self, project, settings):
         pass
 
     def deploy(self):
