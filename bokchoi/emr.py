@@ -122,7 +122,7 @@ class EMR(object):
                         'InstanceRole': 'MASTER',
                         'BidPrice': spot_price,
                         'InstanceType': instance_type,
-                        'InstanceCount': 1,
+                        'InstanceCount': 1
                     },
                     {
                         'Name': 'EmrCore',
@@ -130,11 +130,26 @@ class EMR(object):
                         'InstanceRole': 'CORE',
                         'BidPrice': spot_price,
                         'InstanceType': instance_type,
-                        'InstanceCount': instances - 1,
+                        'InstanceCount': instances - 1
                     },
                 ],
                 'Ec2KeyName': ec2_key_name
             },
+            Configurations=[
+                {
+                    "Classification": "spark-env",
+                    "Properties": {},
+                    "Configurations": [
+                        {
+                            "Classification": "export",
+                            "Properties": {
+                                "PYSPARK_PYTHON": "python34"
+                            },
+                            "Configurations": []
+                        }
+                    ]
+                }
+            ],
             Applications=[{'Name': 'Hadoop'}, {'Name': 'Spark'}],
             JobFlowRole='EMR_EC2_DefaultRole',
             ServiceRole='EMR_DefaultRole',
