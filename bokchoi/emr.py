@@ -49,18 +49,16 @@ class EMR(object):
         for pol in helper.get_policies(self.job_id):
             helper.delete_policy(pol)
 
-        for role in helper.get_roles(self.job_id):
-            helper.delete_role(role)
-
         for prof in helper.get_instance_profiles(self.job_id):
             helper.delete_instance_profile(prof)
+
+        for role in helper.get_roles(self.job_id):
+            helper.delete_role(role)
 
         # remove s3 bucket
         helper.delete_bucket(self.bucket)
         helper.delete_scheduler(self.job_id)
         helper.delete_cloudwatch_rule(self.job_id + '-schedule-event')
-
-
 
     def run(self):
         """Create Spark cluster and run specified job
@@ -70,11 +68,11 @@ class EMR(object):
 
         instance_type = self.settings['EMR']['LaunchSpecification']['InstanceType']
         instances = self.settings['EMR']['InstanceCount']
-        main_script = self.settings['EntryPoint']
+        subnet = self.settings['EMR']['LaunchSpecification']['SubnetId']
 
         return self.emr_client.run_job_flow(
             Name=self.job_id,
-            LogUri=self.job_id,
+            LogUri='s3://'+self.job_id,
             ReleaseLabel='emr-5.8.0',
             Instances={
                 'MasterInstanceType': instance_type,
@@ -82,6 +80,7 @@ class EMR(object):
                 'InstanceCount': instances,
                 'KeepJobFlowAliveWhenNoSteps': False,
                 'TerminationProtected': False,
+                'Ec2SubnetId': subnet,
             },
             Applications=[{'Name': 'Spark'}],
             BootstrapActions=[
@@ -122,7 +121,7 @@ class EMR(object):
                     'ActionOnFailure': 'CANCEL_AND_WAIT',
                     'HadoopJarStep': {
                         'Jar': 'command-runner.jar',
-                        'Args': ['spark-submit', '/home/hadoop/' + main_script]
+                        'Args': ['spark-submit', '/home/hadoop/' + self.settings['EntryPoint']]
                     }
                 }
             ],
