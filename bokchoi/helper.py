@@ -185,14 +185,16 @@ def upload_zip(bucket, zip_file, zip_file_name):
     s3_resource.Bucket(bucket).put_object(Body=zip_file, Key=zip_file_name)
 
 
-def create_bucket(region, job_id):
+def create_bucket(region, bucket_name):
 
-    bucket_name = job_id
-
-    s3_resource.create_bucket(Bucket=bucket_name
-                              , CreateBucketConfiguration={'LocationConstraint': region})
-
-    return bucket_name
+    try:
+        s3_resource.create_bucket(Bucket=bucket_name
+                                  , CreateBucketConfiguration={'LocationConstraint': region})
+    except ClientError as exception:
+        if exception.response['Error']['Code'] == 'BucketAlreadyOwnedByYou':
+            print('Bucket already exists and owned by you, continuing')
+        else:
+            raise exception
 
 
 def create_instance_profile(profile_name, role_name=None):
