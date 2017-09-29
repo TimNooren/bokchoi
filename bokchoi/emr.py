@@ -104,23 +104,27 @@ class EMR(object):
         """
         instance_type = self.settings['EMR']['LaunchSpecification']['InstanceType']
         instances = self.settings['EMR']['InstanceCount']
-        ec2_key_name = self.settings['EMR']['EC2KeyName']
-        version = self.settings['EMR']['Version']
-        spot_price = self.settings['EMR']['SpotPrice']
+        master_sg_id = self.settings['EMR']['LaunchSpecification']['MasterSecurityGroupId']
+        slave_sg_id = self.settings['EMR']['LaunchSpecification']['SlaveSecurityGroupId']
+        service_sg_id = self.settings['EMR']['LaunchSpecification']['ServiceSecurityGroupId']
 
         response = emr_client.run_job_flow(
             Name=self.job_id,
             LogUri="s3://{}/spark/".format(self.job_id),
-            ReleaseLabel=version,
+            ReleaseLabel=self.settings['EMR']['Version'],
             Instances={
                 'KeepJobFlowAliveWhenNoSteps': False,
                 'TerminationProtected': False,
+                'Ec2SubnetId': self.settings['EMR']['LaunchSpecification']['SubnetId'],
+                'ServiceAccessSecurityGroup': service_sg_id,
+                'EmrManagedMasterSecurityGroup': master_sg_id,
+                'EmrManagedSlaveSecurityGroup': slave_sg_id,
                 'InstanceGroups': [
                     {
                         'Name': 'EmrMaster',
                         'Market': 'SPOT',
                         'InstanceRole': 'MASTER',
-                        'BidPrice': spot_price,
+                        'BidPrice': self.settings['EMR']['SpotPrice'],
                         'InstanceType': instance_type,
                         'InstanceCount': 1
                     },
@@ -128,12 +132,12 @@ class EMR(object):
                         'Name': 'EmrCore',
                         'Market': 'SPOT',
                         'InstanceRole': 'CORE',
-                        'BidPrice': spot_price,
+                        'BidPrice': self.settings['EMR']['SpotPrice'],
                         'InstanceType': instance_type,
                         'InstanceCount': instances - 1
                     },
                 ],
-                'Ec2KeyName': ec2_key_name
+                'Ec2KeyName': self.settings['EMR']['EC2KeyName']
             },
             Configurations=[
                 {
@@ -172,7 +176,7 @@ class EMR(object):
             click.secho("Error creating: (status code {})".format(response_code), fg='red')
             sys.exit(1)
 
-        click.secho("Created Spark {} with job {}".format(version, self.job_flow_id), fg='green')
+        click.secho("Created Spark cluster with job {}".format(self.job_flow_id), fg='green')
 
     def step_prepare_env(self, emr_client):
         """Copies files from S3 and unzips them"""

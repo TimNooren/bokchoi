@@ -496,3 +496,25 @@ def delete_cloudwatch_rule(rule_name):
             print('Cloudwatch rule does not exist')
         else:
             raise e
+
+def create_emr_security_groups():
+    """EMR requires a minimum of two security groups to allow communication between
+    the master and slave instances. This function creates the neccesary sec. groups.
+
+    AWS has three types of security groups for EMR:
+        ServiceAccessSecurityGroup: used to access other EC2 instances
+        EmrManagedMasterSecurityGroup: is attached to the master node
+        EmrManagedSlaveSecurityGroup: is attached to the slave node(s)
+
+    returns: a dict with the three security groups
+             (e.g. { "ServiceAccessSecurityGroup": "sg-123456" })
+    """
+    service_sg = None
+    master_sg = None
+    slave_sg = None
+
+    return {
+        "ServiceAccessSecurityGroup": service_sg,
+        "EmrManagedMasterSecurityGroup": master_sg,
+        "EmrManagedSlaveSecurityGroup": slave_sg
+    }
