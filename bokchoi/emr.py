@@ -155,14 +155,6 @@ class EMR(object):
             ServiceRole='EMR_DefaultRole',
             VisibleToAllUsers=True,
 
-            BootstrapActions=[
-                {
-                    'Name': 'Maximize Spark Default Config',
-                    'ScriptBootstrapAction': {
-                        'Path': 's3://support.elasticmapreduce/spark/maximize-spark-default-config',
-                    }
-                },
-            ],
         )
         # parse EMR response to check if successful
         response_code = response['ResponseMetadata']['HTTPStatusCode']
