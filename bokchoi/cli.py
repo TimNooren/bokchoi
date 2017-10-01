@@ -5,7 +5,7 @@ Main cli program which allows execution of commands
 import sys
 import click
 
-from . import helper
+from . import common
 from .ec2 import EC2
 from .emr import EMR
 
@@ -15,7 +15,7 @@ from .emr import EMR
 @click.pass_context
 def cli(ctx, project):
     """Starting point for cli commands"""
-    settings = helper.load_settings(project)
+    settings = common.load_settings(project)
 
     # instantiate object based on given platform parameter in settings file
     platforms = {'EC2': EC2, 'EMR': EMR}

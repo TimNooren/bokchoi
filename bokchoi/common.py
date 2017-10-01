@@ -1,10 +1,17 @@
 
 from time import sleep
-import hashlib
 from io import BytesIO
-import json
-import os
 import zipfile
+import os
+import json
+import hashlib
+
+try:
+    from . import ec2
+    from . import emr
+except ImportError:
+    import ec2
+    import emr
 
 import boto3
 from botocore.exceptions import ClientError
@@ -24,30 +31,7 @@ lambda_client = session.client('lambda')
 
 events_client = session.client('events')
 
-USER_DATA = """#!/bin/bash
-
-# Install aws-cli
-sudo curl "https://s3.amazonaws.com/aws-cli/awscli-bundle.zip" -o "awscli-bundle.zip"
-python3 -c "import zipfile; zf = zipfile.ZipFile('/awscli-bundle.zip'); zf.extractall('/');"
-sudo chmod u+x /awscli-bundle/install
-python3 /awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws
-
-# Download project zip
-aws s3 cp s3://{bucket}/{package} /tmp/
-python3 -c "import zipfile; zf = zipfile.ZipFile('/tmp/{package}'); zf.extractall('/tmp/');"
-
-# Install pip3 and install requirements.txt from project zip if included
-curl -sS https://bootstrap.pypa.io/get-pip.py | sudo python3
-[ -f /tmp/requirements.txt ] && pip3 install -r /tmp/requirements.txt
-
-# Run app
-cd /tmp
-python3 -c "import {app}; {app}.{entry}();"
-aws s3 cp /var/log/cloud-init-output.log s3://{bucket}/cloud-init-output.log
-shutdown -h now
-"""
-
-TRUST_POLICY = """{
+DEFAULT_TRUST_POLICY = """{
   "Version": "2012-10-17",
   "Statement": [
     {
@@ -104,7 +88,9 @@ SCHEDULER_POLICY = """{
        "ec2:DescribeSecurityGroups",
        "ec2:DescribeSpotInstanceRequests",
        "ec2:CreateTags",
-       "iam:PassRole"
+       "iam:PassRole",
+       "elasticmapreduce:RunJobFlow",
+       "elasticmapreduce:AddJobFlowSteps"
         ],
     "Resource": ["*"]
   }]
@@ -138,6 +124,30 @@ EVENT_TRUST_POLICY = """{
 }"""
 
 
+def get_aws_account_id():
+    response = ec2_client.describe_security_groups(GroupNames=['Default'])
+    return response['SecurityGroups'][0]['OwnerId']
+
+
+def create_bucket(region, bucket_name):
+
+    try:
+        s3_resource.create_bucket(Bucket=bucket_name
+                                  , CreateBucketConfiguration={'LocationConstraint': region})
+    except ClientError as exception:
+        if exception.response['Error']['Code'] == 'BucketAlreadyOwnedByYou':
+            print('Bucket already exists and owned by you, continuing')
+        else:
+            raise exception
+
+    print('Created bucket: ' + bucket_name)
+    return bucket_name
+
+
+def upload_zip(bucket, zip_file, zip_file_name):
+    s3_resource.Bucket(bucket).put_object(Body=zip_file, Key=zip_file_name)
+
+
 def retry(func, **kwargs):
 
     for _ in range(60):
@@ -148,6 +158,346 @@ def retry(func, **kwargs):
             sleep(1)
 
     raise e
+
+
+def create_instance_profile(profile_name, role_name=None):
+
+    create_instance_profile_response = iam_client.create_instance_profile(
+        InstanceProfileName=profile_name
+    )
+
+    if role_name:
+        iam_client.add_role_to_instance_profile(
+            InstanceProfileName=profile_name,
+            RoleName=role_name
+        )
+
+    return create_instance_profile_response['InstanceProfile']
+
+
+def create_policy(name, document):
+
+    try:
+        response = iam_client.create_policy(
+            PolicyName=name,
+            PolicyDocument=document
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'EntityAlreadyExists':
+            print('Policy already exists')
+        else:
+            raise e
+    else:
+        return response['Policy']['Arn']
+
+
+def create_role(role_name, trust_policy, *policy_arns):
+
+    create_role_response = iam_client.create_role(
+        RoleName=role_name,
+        AssumeRolePolicyDocument=trust_policy)
+
+    for policy_arn in policy_arns:
+        print('\n' + policy_arn + '\n')
+        iam_client.attach_role_policy(
+            RoleName=role_name,
+            PolicyArn=policy_arn
+        )
+
+    return create_role_response['Role']
+
+
+def request_spot_instances(project_id, settings):
+
+    response = ec2_client.request_spot_instances(**settings)
+
+    spot_request_id = response['SpotInstanceRequests'][0]['SpotInstanceRequestId']
+
+    waiter = ec2_client.get_waiter('spot_instance_request_fulfilled')
+    waiter.wait(SpotInstanceRequestIds=[spot_request_id])
+
+    ec2_client.create_tags(Resources=[spot_request_id]
+                           , Tags=[{'Key': 'bokchoi-id', 'Value': project_id}])
+
+    response = ec2_client.describe_spot_instance_requests(SpotInstanceRequestIds=[spot_request_id])
+    instance_ids = [request['InstanceId'] for request in response['SpotInstanceRequests']]
+
+    ec2_client.create_tags(Resources=instance_ids, Tags=[{'Key': 'bokchoi-id', 'Value': project_id}])
+
+
+def cancel_spot_request(project_id):
+    print('\nCancelling spot request')
+    filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(project_id)]}
+               , {'Name': 'state', 'Values': ['open', 'active']}]
+    response = ec2_client.describe_spot_instance_requests(Filters=filters)
+
+    spot_request_ids = [request['SpotInstanceRequestId'] for request in response['SpotInstanceRequests']]
+
+    try:
+        ec2_client.cancel_spot_instance_requests(SpotInstanceRequestIds=spot_request_ids)
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'InvalidParameterCombination':
+            print('No spot requests to cancel')
+        else:
+            raise e
+
+    print('Spot requests cancelled')
+
+
+def terminate_instances(project_id):
+    print('\nTerminating instances')
+    filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(project_id)]}]
+    ec2_resource.instances.filter(Filters=filters).terminate()
+    print('Instances terminated')
+
+
+def delete_bucket(project_id):
+    print('\nDelete Bucket')
+
+    bucket = s3_resource.Bucket(project_id)
+
+    try:
+        bucket.objects.delete()
+        bucket.delete()
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchBucket':
+            pass
+        else:
+            raise e
+
+
+def get_instance_profiles(project_id):
+    for instance_profile in iam_resource.instance_profiles.all():
+        if project_id in instance_profile.instance_profile_name:
+            yield instance_profile
+
+
+def delete_instance_profile(instance_profile):
+    instance_profile_name = instance_profile.instance_profile_name
+    print('\nDeleting Instance Profile:', instance_profile_name)
+
+    try:
+        for role in instance_profile.roles_attribute:
+            instance_profile.remove_role(RoleName=role['RoleName'])
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchEntity':
+            pass
+        else:
+            raise e
+
+    try:
+        instance_profile.delete()
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchEntity':
+            pass
+        else:
+            raise e
+
+    print('Successfully deleted Instance Profile:', instance_profile_name)
+
+
+def get_roles(project_id):
+    for role in iam_resource.roles.all():
+        if project_id in role.role_name:
+            yield role
+
+
+def delete_role(role):
+
+    role_name = role.role_name
+    print('\nDeleting Role:', role_name)
+
+    try:
+        for policy in role.attached_policies.all():
+            policy.detach_role(RoleName=role_name)
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchEntity':
+            print('No policies to detach')
+        else:
+            raise e
+
+    try:
+        role.delete()
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchEntity':
+            print('Role does not exist')
+        else:
+            raise e
+
+    print('Successfully deleted role:', role_name)
+
+
+def get_policies(project_id):
+    for policy in iam_resource.policies.filter(Scope='Local'):
+        if project_id in policy.policy_name:
+            yield policy
+
+
+def delete_policy(policy):
+
+    policy_name = policy.policy_name
+    print('\nDeleting Policy:', policy_name)
+
+    try:
+        for role in policy.attached_roles.all():
+            policy.detach_role(RoleName=role.role_name)
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchEntity':
+            print('Role for policy does not exist')
+        else:
+            raise e
+
+    try:
+        policy.delete()
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchEntity':
+            print('Policy does not exist')
+        else:
+            raise e
+
+    print('Successfully deleted Policy:', policy_name)
+
+
+def create_policies(project_id, custom_policy):
+    """Create policies for EMR related tasks"""
+    policy_arns = []
+
+    # declare default policy settings
+    default_policy_name = project_id + '-default-policy'
+    default_policy_document = DEFAULT_POLICY.format(bucket=project_id)
+    default_policy_arn = create_policy(default_policy_name, default_policy_document)
+    policy_arns.append(default_policy_arn)
+
+    if custom_policy:
+        print('Creating custom policy')
+
+        custom_policy_name = project_id + '-custom-policy'
+        custom_policy_arn = create_policy(custom_policy_name, custom_policy)
+        policy_arns.append(custom_policy_arn)
+
+    return policy_arns
+
+
+def create_default_role_and_profile(project_id, policy_arns):
+    role_name = project_id + '-default-role'
+    create_role(role_name, DEFAULT_TRUST_POLICY, *policy_arns)
+    create_instance_profile(role_name, role_name)
+
+
+def create_scheduler(project_id, project, settings):
+
+    from . import scheduler
+
+    file_object = BytesIO()
+
+    requirements = settings.get('Requirements')
+
+    cwd = os.getcwd()
+
+    with zipfile.ZipFile(file_object, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.write(scheduler.__file__, 'scheduler.py')
+        zip_file.write(__file__, 'common.py')
+        zip_file.write(ec2.__file__, 'ec2.py')
+        zip_file.write(emr.__file__, 'emr.py')
+        zip_file.write('\\'.join((cwd, 'bokchoi_settings.json')), 'bokchoi_settings.json')
+
+        zip_file.writestr('__init__.py', '')
+
+        if requirements:
+            zip_file.writestr('requirements.txt', '\n'.join(requirements))
+
+    file_object.seek(0)
+
+    bucket_name = project_id
+    zip_file_name = 'bokchoi-scheduler.zip'
+    upload_zip(bucket_name, file_object, zip_file_name)
+
+    policy_name = project_id + '-scheduler-policy'
+    policy_arn = create_policy(policy_name, SCHEDULER_POLICY)
+
+    role_name = project_id + '-scheduler-role'
+    response = create_role(role_name, SCHEDULER_TRUST_POLICY, policy_arn)
+
+    # AWS has some specific demands on cron schedule:
+    # http://docs.aws.amazon.com/lambda/latest/dg/tutorial-scheduled-events-schedule-expressions.html
+    create_function_response = retry(lambda_client.create_function
+                                     , FunctionName=project_id + '-scheduler'
+                                     , Runtime='python3.6'
+                                     , Handler='scheduler.run'
+                                     , Role=response['Arn']
+                                     , Code={'S3Bucket': bucket_name
+                                             , 'S3Key': zip_file_name}
+                                     , Timeout=30
+                                     , Environment={'Variables': {'project': project}}
+                                     , Tags={'bokchoi-id': project_id})
+    function_arn = create_function_response['FunctionArn']
+
+    policy_name = project_id + '-event-policy'
+    policy_arn = create_policy(policy_name, EVENT_POLICY)
+
+    role_name = project_id + '-event-role'
+    response = create_role(role_name, EVENT_TRUST_POLICY, policy_arn)
+    role_arn = response['Arn']
+
+    schedule = settings['Schedule']
+    create_cloudwatch_rule(project_id, schedule, role_arn, function_arn)
+
+
+def delete_scheduler(project_id):
+
+    try:
+        lambda_client.delete_function(FunctionName=project_id + '-scheduler')
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceNotFoundException':
+            print('Function does not exist')
+        else:
+            raise e
+
+
+def create_cloudwatch_rule(project_id, schedule, role_arn, function_arn):
+
+    rule_name = project_id + '-schedule-event'
+    retry(events_client.put_rule
+          , Name=rule_name
+          , ScheduleExpression=schedule
+          , State='ENABLED'
+          , RoleArn=role_arn)
+
+    events_client.put_targets(Rule=rule_name
+                              , Targets=[{'Arn': function_arn, 'Id': '0'}])
+
+    function_name = project_id + '-scheduler'
+    lambda_client.add_permission(
+        FunctionName=function_name,
+        StatementId='0',
+        Action='lambda:InvokeFunction',
+        Principal='events.amazonaws.com'
+    )
+
+
+def delete_cloudwatch_rule(rule_name):
+
+    try:
+        events_client.remove_targets(Rule=rule_name
+                                     , Ids=['0'])
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceNotFoundException':
+            print('No targets to remove from rule')
+        else:
+            raise e
+
+    try:
+        events_client.delete_rule(Name=rule_name)
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceNotFoundException':
+            print('Cloudwatch rule does not exist')
+        else:
+            raise e
+
+
+def create_project_id(project, vendor_specific_id):
+
+    return 'bokchoi-' + hashlib.sha1((vendor_specific_id + project).encode()).hexdigest()
 
 
 def load_settings(project_name):
@@ -179,342 +529,3 @@ def zip_package(path, requirements=None):
     file_object.seek(0)
 
     return file_object
-
-
-def upload_zip(bucket, zip_file, zip_file_name):
-    s3_resource.Bucket(bucket).put_object(Body=zip_file, Key=zip_file_name)
-
-
-def create_bucket(region, bucket_name):
-
-    try:
-        s3_resource.create_bucket(Bucket=bucket_name
-                                  , CreateBucketConfiguration={'LocationConstraint': region})
-    except ClientError as exception:
-        if exception.response['Error']['Code'] == 'BucketAlreadyOwnedByYou':
-            print('Bucket already exists and owned by you, continuing')
-        else:
-            raise exception
-
-
-def create_instance_profile(profile_name, role_name=None):
-
-    create_instance_profile_response = iam_client.create_instance_profile(
-        InstanceProfileName=profile_name
-    )
-
-    if role_name:
-        iam_client.add_role_to_instance_profile(
-            InstanceProfileName=profile_name,
-            RoleName=role_name
-        )
-
-    return create_instance_profile_response['InstanceProfile']
-
-
-def create_policy(name, document):
-
-    response = iam_client.create_policy(
-        PolicyName=name,
-        PolicyDocument=document
-    )
-
-    return response['Policy']['Arn']
-
-
-def create_role(role_name, trust_policy, *policy_arns):
-
-    create_role_response = iam_client.create_role(
-        RoleName=role_name,
-        AssumeRolePolicyDocument=trust_policy
-    )
-
-    for policy_arn in policy_arns:
-        iam_client.attach_role_policy(
-            RoleName=role_name,
-            PolicyArn=policy_arn
-        )
-
-    return create_role_response['Role']
-
-
-def get_aws_account_id():
-    response = ec2_client.describe_security_groups(GroupNames=['Default'])
-    return response['SecurityGroups'][0]['OwnerId']
-
-
-def create_job_id(project):
-    aws_account_id = get_aws_account_id()
-    return 'bokchoi-' + hashlib.sha1((aws_account_id + project).encode()).hexdigest()
-
-
-def request_spot_instances(job_id, settings):
-
-    response = ec2_client.request_spot_instances(**settings)
-
-    spot_request_id = response['SpotInstanceRequests'][0]['SpotInstanceRequestId']
-
-    waiter = ec2_client.get_waiter('spot_instance_request_fulfilled')
-    waiter.wait(SpotInstanceRequestIds=[spot_request_id])
-
-    ec2_client.create_tags(Resources=[spot_request_id]
-                           , Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
-
-    response = ec2_client.describe_spot_instance_requests(SpotInstanceRequestIds=[spot_request_id])
-    instance_ids = [request['InstanceId'] for request in response['SpotInstanceRequests']]
-
-    ec2_client.create_tags(Resources=instance_ids, Tags=[{'Key': 'bokchoi-id', 'Value': job_id}])
-
-
-def cancel_spot_request(job_id):
-    print('\nCancelling spot request')
-    filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(job_id)]}
-               , {'Name': 'state', 'Values': ['open', 'active']}]
-    response = ec2_client.describe_spot_instance_requests(Filters=filters)
-
-    spot_request_ids = [request['SpotInstanceRequestId'] for request in response['SpotInstanceRequests']]
-
-    try:
-        ec2_client.cancel_spot_instance_requests(SpotInstanceRequestIds=spot_request_ids)
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'InvalidParameterCombination':
-            print('No spot requests to cancel')
-        else:
-            raise e
-
-    print('Spot requests cancelled')
-
-
-def terminate_instances(job_id):
-    print('\nTerminating instances')
-    filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(job_id)]}]
-    ec2_resource.instances.filter(Filters=filters).terminate()
-    print('Instances terminated')
-
-
-def delete_bucket(job_id):
-    print('\nDelete Bucket')
-
-    bucket = s3_resource.Bucket(job_id)
-
-    try:
-        bucket.objects.delete()
-        bucket.delete()
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'NoSuchBucket':
-            pass
-        else:
-            raise e
-
-
-def get_instance_profiles(job_id):
-    for instance_profile in iam_resource.instance_profiles.all():
-        if job_id in instance_profile.instance_profile_name:
-            yield instance_profile
-
-
-def delete_instance_profile(instance_profile):
-    instance_profile_name = instance_profile.instance_profile_name
-    print('\nDeleting Instance Profile:', instance_profile_name)
-
-    try:
-        for role in instance_profile.roles_attribute:
-            instance_profile.remove_role(RoleName=role['RoleName'])
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'NoSuchEntity':
-            pass
-        else:
-            raise e
-
-    try:
-        instance_profile.delete()
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'NoSuchEntity':
-            pass
-        else:
-            raise e
-
-    print('Successfully deleted Instance Profile:', instance_profile_name)
-
-
-def get_roles(job_id):
-    for role in iam_resource.roles.all():
-        if job_id in role.role_name:
-            yield role
-
-
-def delete_role(role):
-
-    role_name = role.role_name
-    print('\nDeleting Role:', role_name)
-
-    try:
-        for policy in role.attached_policies.all():
-            policy.detach_role(RoleName=role_name)
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'NoSuchEntity':
-            print('No policies to detach')
-        else:
-            raise e
-
-    try:
-        role.delete()
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'NoSuchEntity':
-            print('Role does not exist')
-        else:
-            raise e
-
-    print('Successfully deleted role:', role_name)
-
-
-def get_policies(job_id):
-    for policy in iam_resource.policies.filter(Scope='Local'):
-        if job_id in policy.policy_name:
-            yield policy
-
-
-def delete_policy(policy):
-
-    policy_name = policy.policy_name
-    print('\nDeleting Policy:', policy_name)
-
-    try:
-        for role in policy.attached_roles.all():
-            policy.detach_role(RoleName=role.role_name)
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'NoSuchEntity':
-            print('Role for policy does not exist')
-        else:
-            raise e
-
-    try:
-        policy.delete()
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'NoSuchEntity':
-            print('Policy does not exist')
-        else:
-            raise e
-
-    print('Successfully deleted Policy:', policy_name)
-
-
-def create_scheduler(job_id, project, schedule, requirements=None):
-
-    from . import scheduler
-
-    file_object = BytesIO()
-
-    cwd = os.getcwd()
-
-    with zipfile.ZipFile(file_object, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        zip_file.write(scheduler.__file__, 'scheduler.py')
-        zip_file.write(__file__, 'main.py')
-        zip_file.write('\\'.join((cwd, 'bokchoi_settings.json')), 'bokchoi_settings.json')
-
-        if requirements:
-            zip_file.writestr('requirements.txt', '\n'.join(requirements))
-
-    file_object.seek(0)
-
-    bucket_name = job_id
-
-    zip_file_name = 'bokchoi-scheduler.zip'
-    upload_zip(bucket_name, file_object, zip_file_name)
-
-    policy_document = SCHEDULER_POLICY
-    policy_name = job_id + '-scheduler-policy'
-    policy_arn = create_policy(policy_name, policy_document)
-
-    role_name = job_id + '-scheduler-role'
-    response = create_role(role_name, SCHEDULER_TRUST_POLICY, policy_arn)
-
-    # AWS has some specific demands on cron schedule:
-    # http://docs.aws.amazon.com/lambda/latest/dg/tutorial-scheduled-events-schedule-expressions.html
-    create_function_response = retry(lambda_client.create_function
-                                     , FunctionName=job_id + '-scheduler'
-                                     , Runtime='python3.6'
-                                     , Handler='scheduler.run'
-                                     , Role=response['Arn']
-                                     , Code={'S3Bucket': bucket_name
-                                             , 'S3Key': zip_file_name}
-                                     , Timeout=30
-                                     , Environment={'Variables': {'project': project}}
-                                     , Tags={'bokchoi-id': job_id})
-
-    policy_document = EVENT_POLICY
-    policy_name = job_id + '-event-policy'
-    policy_arn = create_policy(policy_name, policy_document)
-
-    role_name = job_id + '-event-role'
-    response = create_role(role_name, EVENT_TRUST_POLICY, policy_arn)
-
-    rule_name = job_id + '-schedule-event'
-    retry(events_client.put_rule
-          , Name=rule_name
-          , ScheduleExpression=schedule
-          , State='ENABLED'
-          , RoleArn=response['Arn'])
-
-    events_client.put_targets(Rule=rule_name
-                              , Targets=[{'Arn': create_function_response['FunctionArn'], 'Id': '0'}])
-
-    lambda_client.add_permission(
-        FunctionName=job_id + '-scheduler',
-        StatementId='0',
-        Action='lambda:InvokeFunction',
-        Principal='events.amazonaws.com'
-    )
-
-
-def delete_scheduler(job_id):
-
-    try:
-        lambda_client.delete_function(FunctionName=job_id + '-scheduler')
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'ResourceNotFoundException':
-            print('Function does not exist')
-        else:
-            raise e
-
-
-def delete_cloudwatch_rule(rule_name):
-
-    try:
-        events_client.remove_targets(Rule=rule_name
-                                     , Ids=['0'])
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'ResourceNotFoundException':
-            print('No targets to remove from rule')
-        else:
-            raise e
-
-    try:
-        events_client.delete_rule(Name=rule_name)
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'ResourceNotFoundException':
-            print('Cloudwatch rule does not exist')
-        else:
-            raise e
-
-def create_emr_security_groups():
-    """EMR requires a minimum of two security groups to allow communication between
-    the master and slave instances. This function creates the neccesary sec. groups.
-
-    AWS has three types of security groups for EMR:
-        ServiceAccessSecurityGroup: used to access other EC2 instances
-        EmrManagedMasterSecurityGroup: is attached to the master node
-        EmrManagedSlaveSecurityGroup: is attached to the slave node(s)
-
-    returns: a dict with the three security groups
-             (e.g. { "ServiceAccessSecurityGroup": "sg-123456" })
-    """
-    service_sg = None
-    master_sg = None
-    slave_sg = None
-
-    return {
-        "ServiceAccessSecurityGroup": service_sg,
-        "EmrManagedMasterSecurityGroup": master_sg,
-        "EmrManagedSlaveSecurityGroup": slave_sg
-    }
