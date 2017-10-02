@@ -8,10 +8,7 @@ import sys
 import time
 import boto3
 
-try:
-    from . import common
-except ImportError:
-    import common
+from bokchoi import common
 
 
 class EMR(object):

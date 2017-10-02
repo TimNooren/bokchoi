@@ -5,9 +5,9 @@ Main cli program which allows execution of commands
 import sys
 import click
 
-from . import common
-from .ec2 import EC2
-from .emr import EMR
+from bokchoi import common
+from bokchoi.ec2 import EC2
+from bokchoi.emr import EMR
 
 
 @click.group()

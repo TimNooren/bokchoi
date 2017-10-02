@@ -5,10 +5,8 @@ Class which can be used to deploy and run EC2 spot instances
 import os
 import base64
 
-try:
-    from . import common
-except ImportError:
-    import common
+from bokchoi import common
+
 
 USER_DATA = """#!/bin/bash
 

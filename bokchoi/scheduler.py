@@ -9,9 +9,9 @@ PROJECT = os.environ.get('project')
 
 def run(event, context):
 
-    import common
-    from ec2 import EC2
-    from emr import EMR
+    from bokchoi import common
+    from bokchoi.ec2 import EC2
+    from bokchoi.emr import EMR
 
     settings = common.load_settings(PROJECT)
 

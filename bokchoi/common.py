@@ -6,12 +6,9 @@ import os
 import json
 import hashlib
 
-try:
-    from . import ec2
-    from . import emr
-except ImportError:
-    import ec2
-    import emr
+
+from bokchoi import ec2
+from bokchoi import emr
 
 import boto3
 from botocore.exceptions import ClientError
@@ -396,9 +393,9 @@ def create_scheduler(project_id, project, settings):
 
     with zipfile.ZipFile(file_object, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.write(scheduler.__file__, 'scheduler.py')
-        zip_file.write(__file__, 'common.py')
-        zip_file.write(ec2.__file__, 'ec2.py')
-        zip_file.write(emr.__file__, 'emr.py')
+        zip_file.write(__file__, 'bokchoi/common.py')
+        zip_file.write(ec2.__file__, 'bokchoi/ec2.py')
+        zip_file.write(emr.__file__, 'bokchoi/emr.py')
         zip_file.write('\\'.join((cwd, 'bokchoi_settings.json')), 'bokchoi_settings.json')
 
         zip_file.writestr('__init__.py', '')
