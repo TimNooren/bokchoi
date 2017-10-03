@@ -33,7 +33,7 @@ This file should contain the following:
   "<project_name>": {
     "EntryPoint": "deep_nn.main",
     "Region": "us-east-1",
-    "Platform": 'EC2'
+    "Platform": "EC2",
     "Requirements": [
       "numpy==1.13.0",
       "boto3==1.4.4"
@@ -83,7 +83,7 @@ Bokchoi now also supports running python applications on Amazon EMR. To run your
   "<project_name>": {
     "EntryPoint": "deep_nn.py",
     "Region": "us-east-1",
-    "Platform": "EMR"
+    "Platform": "EMR",
     "Requirements": [
       "numpy==1.13.0",
       "boto3==1.4.4"
