@@ -3,7 +3,7 @@
 Class which can be used to deploy and run EC2 spot instances
 """
 import os
-import base64
+from base64 import b64encode
 
 from bokchoi import common
 
@@ -96,7 +96,7 @@ class EC2(object):
 
         app, entry = self.entry_point.split('.')
         user_data = USER_DATA.format(bucket=bucket_name, package=self.package_name, app=app, entry=entry)
-        self.launch_config['LaunchSpecification']['UserData'] = base64.b64encode(user_data.encode('ascii')).decode('ascii')
+        self.launch_config['LaunchSpecification']['UserData'] = b64encode(user_data.encode('ascii')).decode('ascii')
 
         self.launch_config['LaunchSpecification']['IamInstanceProfile'] = {'Name': self.project_id + '-default-role'}
 
