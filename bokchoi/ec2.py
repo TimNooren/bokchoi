@@ -3,15 +3,39 @@
 Class which can be used to deploy and run EC2 spot instances
 """
 import os
-import base64
-import click
+from base64 import b64encode
 
-from . import helper
+from bokchoi import common
+
+
+USER_DATA = """#!/bin/bash
+
+# Install aws-cli
+sudo curl "https://s3.amazonaws.com/aws-cli/awscli-bundle.zip" -o "awscli-bundle.zip"
+python3 -c "import zipfile; zf = zipfile.ZipFile('/awscli-bundle.zip'); zf.extractall('/');"
+sudo chmod u+x /awscli-bundle/install
+python3 /awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws
+
+# Download project zip
+aws s3 cp s3://{bucket}/{package} /tmp/
+python3 -c "import zipfile; zf = zipfile.ZipFile('/tmp/{package}'); zf.extractall('/tmp/');"
+
+# Install pip3 and install requirements.txt from project zip if included
+curl -sS https://bootstrap.pypa.io/get-pip.py | sudo python3
+[ -f /tmp/requirements.txt ] && pip3 install -r /tmp/requirements.txt
+
+# Run app
+cd /tmp
+python3 -c "import {app}; {app}.{entry}();"
+aws s3 cp /var/log/cloud-init-output.log s3://{bucket}/cloud-init-output.log
+shutdown -h now
+"""
 
 
 class EC2(object):
     """Create EC2 object which can be used to schedule jobs"""
     def __init__(self, project, settings):
+        self.settings = settings
         self.project_name = project
         self.requirements = settings.get('Requirements')
         self.region = settings.get('Region')
@@ -19,7 +43,8 @@ class EC2(object):
         self.launch_config = settings.get('EC2')
         self.custom_policy = settings.get('CustomPolicy')
 
-        self.project_id = helper.create_job_id(project)
+        aws_account_id = common.get_aws_account_id()
+        self.project_id = common.create_project_id(project, aws_account_id)
         self.package_name = 'bokchoi-' + self.project_name + '.zip'
 
         self.schedule = settings.get('Schedule')
@@ -27,68 +52,52 @@ class EC2(object):
     def deploy(self):
         """Zip package and deploy to S3"""
 
-        bucket = helper.create_bucket(self.region, self.project_id)
+        bucket_name = common.create_bucket(self.region, self.project_id)
 
         cwd = os.getcwd()
-        package = helper.zip_package(cwd, self.requirements)
+        package = common.zip_package(cwd, self.requirements)
+        common.upload_zip(bucket_name, package, self.package_name)
 
-        helper.upload_zip(bucket, package, self.package_name)
+        policy_arns = common.create_policies(self.project_id, self.custom_policy)
 
-        policy_arns = []
-
-        default_policy_name = self.project_id + '-default-policy'
-        default_policy_document = helper.DEFAULT_POLICY.format(bucket=bucket)
-        default_policy_arn = helper.create_policy(default_policy_name, default_policy_document)
-        policy_arns.append(default_policy_arn)
-
-        if self.custom_policy:
-            click.echo('Creating custom policy')
-
-            custom_policy_name = self.project_id + '-custom-policy'
-            custom_policy_document = self.custom_policy
-            custom_policy_arn = helper.create_policy(custom_policy_name, custom_policy_document)
-            policy_arns.append(custom_policy_arn)
-
-        role_name = self.project_id + '-default-role'
-        helper.create_role(role_name, helper.TRUST_POLICY, *policy_arns)
-        helper.create_instance_profile(role_name, role_name)
+        common.create_default_role_and_profile(self.project_id, policy_arns)
 
         if self.schedule:
-            click.echo('Scheduling job using ' + self.schedule)
-            helper.create_scheduler(self.project_id, self.project_name, self.schedule, self.requirements)
+            print('Scheduling job using ' + self.schedule)
+            common.create_scheduler(self.project_id, self.project_name, self.settings)
 
     def undeploy(self):
         """Deletes all policies, users, and instances permanently"""
 
-        helper.cancel_spot_request(self.project_id)
-        helper.terminate_instances(self.project_id)
+        common.cancel_spot_request(self.project_id)
+        common.terminate_instances(self.project_id)
 
-        helper.delete_bucket(self.project_id)
+        common.delete_bucket(self.project_id)
 
-        for policy in helper.get_policies(self.project_id):
-            helper.delete_policy(policy)
+        for policy in common.get_policies(self.project_id):
+            common.delete_policy(policy)
 
-        for instance_profile in helper.get_instance_profiles(self.project_id):
-            helper.delete_instance_profile(instance_profile)
+        for instance_profile in common.get_instance_profiles(self.project_id):
+            common.delete_instance_profile(instance_profile)
 
-        for role in helper.get_roles(self.project_id):
-            helper.delete_role(role)
+        for role in common.get_roles(self.project_id):
+            common.delete_role(role)
 
-        helper.delete_scheduler(self.project_id)
+        common.delete_scheduler(self.project_id)
 
         rule_name = self.project_id + '-schedule-event'
-        helper.delete_cloudwatch_rule(rule_name)
+        common.delete_cloudwatch_rule(rule_name)
 
     def run(self):
         """Create EC2 machine with given AMI and instance settings"""
-        click.echo("Running EC2 instance")
+        print("Running EC2 instance")
 
         bucket_name = self.project_id
 
         app, entry = self.entry_point.split('.')
-        user_data = helper.USER_DATA.format(bucket=bucket_name, package=self.package_name, app=app, entry=entry)
-        self.launch_config['LaunchSpecification']['UserData'] = base64.b64encode(user_data.encode('ascii')).decode('ascii')
+        user_data = USER_DATA.format(bucket=bucket_name, package=self.package_name, app=app, entry=entry)
+        self.launch_config['LaunchSpecification']['UserData'] = b64encode(user_data.encode('ascii')).decode('ascii')
 
         self.launch_config['LaunchSpecification']['IamInstanceProfile'] = {'Name': self.project_id + '-default-role'}
 
-        helper.request_spot_instances(self.project_id, self.launch_config)
+        common.request_spot_instances(self.project_id, self.launch_config)
