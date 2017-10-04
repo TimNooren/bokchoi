@@ -69,7 +69,7 @@ This will issue a spot request for the number of spot instances specified in the
 
 To undeploy your job, removing all resources from your AWS environment:
 ```
-bokchoi job_name undeploy
+bokchoi project_name undeploy
 ```
 \
 This will terminate any spot instances related to your job, cancel all spot requests and remove the packaged project from S3. Any IAM resources, such as policies, roles and instance profiles will also be removed.

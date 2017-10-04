@@ -215,7 +215,7 @@ def create_role(role_name, trust_policy, *policy_arns):
     """ Creates IAM role
     :param role_name:               Name of role to create
     :param trust_policy:            Trust policy to associate with role
-    :param policy_arns:             ARN(s) of 1 or more policies to attach to role 
+    :param policy_arns:             ARN(s) of 1 or more policies to attach to role
     :return:                        API response
     """
     create_role_response = iam_client.create_role(
@@ -306,7 +306,6 @@ def delete_bucket(project_id):
 def get_instance_profiles(project_id):
     """ Yields all instance profiles associated with deployment
     :param project_id:              Global project id
-    :return: 
     """
     for instance_profile in iam_resource.instance_profiles.all():
         if project_id in instance_profile.instance_profile_name:
@@ -390,7 +389,6 @@ def get_policies(project_id):
 def delete_policy(policy):
     """ Deletes IAM policy. First detaches all roles from policy.
     :param policy:                  Boto3 policy resource
-    :return: 
     """
     policy_name = policy.policy_name
     print('\nDeleting Policy:', policy_name)
@@ -514,7 +512,6 @@ def create_scheduler(project_id, project, settings):
 def delete_scheduler(project_id):
     """ Deletes scheduler
     :param project_id:              Global project id
-    :return: 
     """
     try:
         lambda_client.delete_function(FunctionName=project_id + '-scheduler')
@@ -579,10 +576,10 @@ def create_project_id(project, vendor_specific_id):
 
 
 def load_settings(project_name):
-    """ Loads settings from bokchoi_settings.json. Looking for settings under 
+    """ Loads settings from bokchoi_settings.json. Looking for settings under
     the project name as a key on the lowest level
     :param project_name:            Name of project
-    :return:                        Settings 
+    :return:                        Settings
     """
     with open('bokchoi_settings.json', 'r') as settings_file:
 
@@ -599,7 +596,7 @@ def zip_package(path, requirements=None):
     if specified in settings
     :param path:                    Path to project directory
     :param requirements:            List of python requirements
-    :return: 
+    :return:                        Zip file
     """
     file_object = BytesIO()
 
