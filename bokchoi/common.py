@@ -28,35 +28,6 @@ lambda_client = session.client('lambda')
 
 events_client = session.client('events')
 
-DEFAULT_TRUST_POLICY = """{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "ec2.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}"""
-
-DEFAULT_POLICY = """{{
-  "Version": "2012-10-17",
-  "Statement": [
-    {{
-      "Action": [
-        "s3:Get*",
-        "s3:List*",
-        "s3:Put*"
-      ],
-      "Effect": "Allow",
-      "Resource": "arn:aws:s3:::{bucket}/*"
-    }}
-  ]
-}}"""
-
 SCHEDULER_TRUST_POLICY = """{
   "Version": "2012-10-17",
   "Statement": [
@@ -147,13 +118,29 @@ def create_bucket(region, bucket_name):
     return bucket_name
 
 
-def upload_zip(bucket, zip_file, zip_file_name):
+def upload_zip(bucket_name, zip_file, zip_file_name, fingerprint):
     """ Uploads zip file to S3
-    :param bucket:                  Bucket name
+    :param bucket_name:             Bucket name
     :param zip_file:                Zipped file
     :param zip_file_name:           Name of zip file in S3
     """
-    s3_resource.Bucket(bucket).put_object(Body=zip_file, Key=zip_file_name)
+    bucket = s3_resource.Bucket(bucket_name)
+
+    try:
+        cur_fingerprint = bucket.Object(zip_file_name).metadata.get('fingerprint')
+    except ClientError as e:
+        if e.response['Error']['Message'] == 'Not Found':
+            print('No package deployed yet. Uploading')
+        else:
+            raise e
+    else:
+        if cur_fingerprint == fingerprint:
+            print('Package fingerprint matches previous, not uploading')
+            return
+        else:
+            print('Updated local package detected. Uploading')
+
+    bucket.put_object(Body=zip_file, Key=zip_file_name, Metadata={'fingerprint': fingerprint})
 
 
 def retry(func, **kwargs):
@@ -166,10 +153,10 @@ def retry(func, **kwargs):
         try:
             response = func(**kwargs)
             return response
-        except ClientError as e:
+        except ClientError:
             sleep(1)
 
-    raise e
+    raise TimeoutError()
 
 
 def create_instance_profile(profile_name, role_name=None):
@@ -178,58 +165,65 @@ def create_instance_profile(profile_name, role_name=None):
     :param role_name:               Name of role to attach to instance profile
     :return:                        API response
     """
-    create_instance_profile_response = iam_client.create_instance_profile(
-        InstanceProfileName=profile_name
-    )
-
-    if role_name:
-        iam_client.add_role_to_instance_profile(
-            InstanceProfileName=profile_name,
-            RoleName=role_name
+    try:
+        create_instance_profile_response = iam_client.create_instance_profile(
+            InstanceProfileName=profile_name
         )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'EntityAlreadyExists':
+            print('Instance profile already exists ' + profile_name)
+        else:
+            raise e
+    else:
+        if role_name:
+            iam_client.add_role_to_instance_profile(
+                InstanceProfileName=profile_name,
+                RoleName=role_name
+            )
 
-    return create_instance_profile_response['InstanceProfile']
+        return create_instance_profile_response['InstanceProfile']
 
 
 def create_policy(name, document):
     """ Creates IAM policy
     :param name:                    Name of policy to create
     :param document:                Policy document associated with policy
-    :return:                        Policy ARN
     """
     try:
-        response = iam_client.create_policy(
-            PolicyName=name,
-            PolicyDocument=document
-        )
+        iam_client.create_policy(PolicyName=name
+                                 , PolicyDocument=document)
     except ClientError as e:
         if e.response['Error']['Code'] == 'EntityAlreadyExists':
-            print('Policy already exists')
+            print('Policy already exists ' + name)
         else:
             raise e
-    else:
-        return response['Policy']['Arn']
 
 
-def create_role(role_name, trust_policy, *policy_arns):
+def create_role(role_name, trust_policy, *policies):
     """ Creates IAM role
     :param role_name:               Name of role to create
     :param trust_policy:            Trust policy to associate with role
     :param policy_arns:             ARN(s) of 1 or more policies to attach to role
     :return:                        API response
     """
-    create_role_response = iam_client.create_role(
-        RoleName=role_name,
-        AssumeRolePolicyDocument=trust_policy)
+    try:
+        iam_client.create_role(RoleName=role_name
+                               , AssumeRolePolicyDocument=trust_policy)
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'EntityAlreadyExists':
+            print('Role already exists ' + role_name)
+        else:
+            raise e
+    else:
+        for policy in policies:
+            if not policy:
+                continue
+            iam_client.attach_role_policy(
+                RoleName=role_name,
+                PolicyArn=policy.arn
+            )
 
-    for policy_arn in policy_arns:
-        print('\n' + policy_arn + '\n')
-        iam_client.attach_role_policy(
-            RoleName=role_name,
-            PolicyArn=policy_arn
-        )
-
-    return create_role_response['Role']
+    return iam_resource.Role(role_name)
 
 
 def request_spot_instances(project_id, settings):
@@ -413,34 +407,27 @@ def delete_policy(policy):
     print('Successfully deleted Policy:', policy_name)
 
 
-def create_policies(project_id, custom_policy):
-    """Creates policies for EMR related tasks"""
-    policy_arns = []
+def create_lambda_function(project_id, project, role, bucket_name, zip_file_name):
 
-    # declare default policy settings
-    default_policy_name = project_id + '-default-policy'
-    default_policy_document = DEFAULT_POLICY.format(bucket=project_id)
-    default_policy_arn = create_policy(default_policy_name, default_policy_document)
-    policy_arns.append(default_policy_arn)
+    function_name = project_id + '-scheduler'
 
-    if custom_policy:
-        print('Creating custom policy')
+    try:
+        lambda_client.create_function(FunctionName=function_name
+                                      , Runtime='python3.6'
+                                      , Handler='scheduler.run'
+                                      , Role=role.arn
+                                      , Code={'S3Bucket': bucket_name
+                                              , 'S3Key': zip_file_name}
+                                      , Timeout=30
+                                      , Environment={'Variables': {'project': project}}
+                                      , Tags={'bokchoi-id': project_id})
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceConflictException':
+            print('Scheduler already exists')
+        else:
+            raise e
 
-        custom_policy_name = project_id + '-custom-policy'
-        custom_policy_arn = create_policy(custom_policy_name, custom_policy)
-        policy_arns.append(custom_policy_arn)
-
-    return policy_arns
-
-
-def create_default_role_and_profile(project_id, policy_arns):
-    """ Creates default role and instance profile for EC2 deployment.
-    :param project_id:              Global project id
-    :param policy_arns:             ARN's of policies to attach to default role
-    """
-    role_name = project_id + '-default-role'
-    create_role(role_name, DEFAULT_TRUST_POLICY, *policy_arns)
-    create_instance_profile(role_name, role_name)
+    return lambda_client.get_function_configuration(FunctionName=function_name)
 
 
 def create_scheduler(project_id, project, settings):
@@ -458,14 +445,12 @@ def create_scheduler(project_id, project, settings):
 
     requirements = settings.get('Requirements')
 
-    cwd = os.getcwd()
-
     with zipfile.ZipFile(file_object, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.write(scheduler.__file__, 'scheduler.py')
         zip_file.write(__file__, 'bokchoi/common.py')
         zip_file.write(ec2.__file__, 'bokchoi/ec2.py')
         zip_file.write(emr.__file__, 'bokchoi/emr.py')
-        zip_file.write('\\'.join((cwd, 'bokchoi_settings.json')), 'bokchoi_settings.json')
+        zip_file.write('\\'.join((os.getcwd(), 'bokchoi_settings.json')), 'bokchoi_settings.json')
 
         zip_file.writestr('__init__.py', '')
 
@@ -476,37 +461,31 @@ def create_scheduler(project_id, project, settings):
 
     bucket_name = project_id
     zip_file_name = 'bokchoi-scheduler.zip'
-    upload_zip(bucket_name, file_object, zip_file_name)
+    upload_zip(bucket_name, file_object, zip_file_name, fingerprint='n/a')
 
     policy_name = project_id + '-scheduler-policy'
     policy_arn = create_policy(policy_name, SCHEDULER_POLICY)
 
     role_name = project_id + '-scheduler-role'
-    response = create_role(role_name, SCHEDULER_TRUST_POLICY, policy_arn)
+    role = create_role(role_name, SCHEDULER_TRUST_POLICY, policy_arn)
 
     # AWS has some specific demands on cron schedule:
     # http://docs.aws.amazon.com/lambda/latest/dg/tutorial-scheduled-events-schedule-expressions.html
-    create_function_response = retry(lambda_client.create_function
-                                     , FunctionName=project_id + '-scheduler'
-                                     , Runtime='python3.6'
-                                     , Handler='scheduler.run'
-                                     , Role=response['Arn']
-                                     , Code={'S3Bucket': bucket_name
-                                             , 'S3Key': zip_file_name}
-                                     , Timeout=30
-                                     , Environment={'Variables': {'project': project}}
-                                     , Tags={'bokchoi-id': project_id})
-    function_arn = create_function_response['FunctionArn']
+    lambda_function = retry(create_lambda_function
+                            , project_id=project_id
+                            , project=project
+                            , role=role
+                            , bucket_name=bucket_name
+                            , zip_file_name=zip_file_name)
 
     policy_name = project_id + '-event-policy'
     policy_arn = create_policy(policy_name, EVENT_POLICY)
 
     role_name = project_id + '-event-role'
-    response = create_role(role_name, EVENT_TRUST_POLICY, policy_arn)
-    role_arn = response['Arn']
+    role = create_role(role_name, EVENT_TRUST_POLICY, policy_arn)
 
     schedule = settings['Schedule']
-    create_cloudwatch_rule(project_id, schedule, role_arn, function_arn)
+    create_cloudwatch_rule(project_id, schedule, role.arn, lambda_function['FunctionArn'])
 
 
 def delete_scheduler(project_id):
@@ -540,12 +519,18 @@ def create_cloudwatch_rule(project_id, schedule, role_arn, function_arn):
                               , Targets=[{'Arn': function_arn, 'Id': '0'}])
 
     function_name = project_id + '-scheduler'
-    lambda_client.add_permission(
-        FunctionName=function_name,
-        StatementId='0',
-        Action='lambda:InvokeFunction',
-        Principal='events.amazonaws.com'
-    )
+    try:
+        lambda_client.add_permission(
+            FunctionName=function_name,
+            StatementId='0',
+            Action='lambda:InvokeFunction',
+            Principal='events.amazonaws.com'
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceConflictException':
+            print('Scheduler rule already exists')
+        else:
+            raise e
 
 
 def delete_cloudwatch_rule(rule_name):
@@ -611,6 +596,8 @@ def zip_package(path, requirements=None):
         if requirements:
             zip_file.writestr('requirements.txt', '\n'.join(requirements))
 
+        fingerprint = '|'.join([str(elem.CRC) for elem in zip_file.infolist()])
+
     file_object.seek(0)
 
-    return file_object
+    return file_object, fingerprint

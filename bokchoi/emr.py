@@ -32,10 +32,10 @@ class EMR(object):
         bucket_name = common.create_bucket(self.settings['Region'], self.project_id)
 
         cwd = os.getcwd()
-        package = common.zip_package(cwd, self.settings.get('Requirements'))
+        package, fingerprint = common.zip_package(cwd, self.settings.get('Requirements'))
 
         package_name = 'bokchoi-' + self.project_name + '.zip'
-        common.upload_zip(bucket_name, package, package_name)
+        common.upload_zip(bucket_name, package, package_name, fingerprint)
         self.schedule()
 
     def run(self):
@@ -47,6 +47,10 @@ class EMR(object):
 
     def undeploy(self):
         """Deletes all policies, users, and instances permanently"""
+
+        common.cancel_spot_request(self.project_id)
+        common.terminate_instances(self.project_id)
+
         for pol in common.get_policies(self.project_id):
             common.delete_policy(pol)
 
@@ -65,44 +69,49 @@ class EMR(object):
         """
         Start Spark cluster based on configuration given in settings
         """
-        instance_type = self.settings['EMR']['LaunchSpecification']['InstanceType']
-        instances = self.settings['EMR']['InstanceCount']
-        additional_sgs = self.settings['EMR']['LaunchSpecification']['AdditionalSecurityGroups']
+
+        launch_spec = self.settings['EMR']['LaunchSpecification']
+
+        instance_type = launch_spec['InstanceType']
+        instance_count = self.settings['EMR']['InstanceCount']
+
+        instances = {'KeepJobFlowAliveWhenNoSteps': False
+                     , 'TerminationProtected': False
+                     , 'Ec2SubnetId': self.settings['EMR']['LaunchSpecification']['SubnetId']
+                     , 'InstanceGroups': [
+                            {
+                                'Name': 'EmrMaster',
+                                'Market': 'SPOT',
+                                'InstanceRole': 'MASTER',
+                                'BidPrice': self.settings['EMR']['SpotPrice'],
+                                'InstanceType': instance_type,
+                                'InstanceCount': 1
+                            },
+                            {
+                                'Name': 'EmrCore',
+                                'Market': 'SPOT',
+                                'InstanceRole': 'CORE',
+                                'BidPrice': self.settings['EMR']['SpotPrice'],
+                                'InstanceType': instance_type,
+                                'InstanceCount': instance_count - 1
+                            }
+                        ]
+                     }
+
+        additional_sgs = launch_spec.get('AdditionalSecurityGroups')
+        if additional_sgs:
+            instances['AdditionalMasterSecurityGroups'] = additional_sgs
+            instances['AdditionalSlaveSecurityGroups'] = additional_sgs
 
         response = emr_client.run_job_flow(
             Name=self.project_id,
             LogUri="s3://{}/spark/".format(self.project_id),
             ReleaseLabel=self.settings['EMR']['Version'],
-            Instances={
-                'KeepJobFlowAliveWhenNoSteps': False,
-                'TerminationProtected': False,
-                'Ec2SubnetId': self.settings['EMR']['LaunchSpecification']['SubnetId'],
-                'AdditionalMasterSecurityGroups': additional_sgs,
-                'AdditionalSlaveSecurityGroups': additional_sgs,
-                'InstanceGroups': [
-                    {
-                        'Name': 'EmrMaster',
-                        'Market': 'SPOT',
-                        'InstanceRole': 'MASTER',
-                        'BidPrice': self.settings['EMR']['SpotPrice'],
-                        'InstanceType': instance_type,
-                        'InstanceCount': 1
-                    },
-                    {
-                        'Name': 'EmrCore',
-                        'Market': 'SPOT',
-                        'InstanceRole': 'CORE',
-                        'BidPrice': self.settings['EMR']['SpotPrice'],
-                        'InstanceType': instance_type,
-                        'InstanceCount': instances - 1
-                    },
-                ]
-            },
+            Instances=instances,
             Configurations=[
-                {
-                    "Classification": "spark-env",
-                    "Properties": {},
-                    "Configurations": [
+                {"Classification": "spark-env"
+                 , "Properties": {}
+                 , "Configurations": [
                         {
                             "Classification": "export",
                             "Properties": {
@@ -113,11 +122,11 @@ class EMR(object):
                     ]
                 }
             ],
+            Tags=[{'Key': 'bokchoi-id', 'Value': self.project_id}],
             Applications=[{'Name': 'Hadoop'}, {'Name': 'Spark'}],
             JobFlowRole='EMR_EC2_DefaultRole',
             ServiceRole='EMR_DefaultRole',
             VisibleToAllUsers=True,
-
         )
         # parse EMR response to check if successful
         response_code = response['ResponseMetadata']['HTTPStatusCode']

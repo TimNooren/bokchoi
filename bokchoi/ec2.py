@@ -31,6 +31,35 @@ aws s3 cp /var/log/cloud-init-output.log s3://{bucket}/cloud-init-output.log
 shutdown -h now
 """
 
+DEFAULT_TRUST_POLICY = """{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}"""
+
+DEFAULT_POLICY = """{{
+  "Version": "2012-10-17",
+  "Statement": [
+    {{
+      "Action": [
+        "s3:Get*",
+        "s3:List*",
+        "s3:Put*"
+      ],
+      "Effect": "Allow",
+      "Resource": "arn:aws:s3:::{bucket}/*"
+    }}
+  ]
+}}"""
+
 
 class EC2(object):
     """Create EC2 object which can be used to schedule jobs"""
@@ -55,12 +84,12 @@ class EC2(object):
         bucket_name = common.create_bucket(self.region, self.project_id)
 
         cwd = os.getcwd()
-        package = common.zip_package(cwd, self.requirements)
-        common.upload_zip(bucket_name, package, self.package_name)
+        package, fingerprint = common.zip_package(cwd, self.requirements)
+        common.upload_zip(bucket_name, package, self.package_name, fingerprint)
 
-        policy_arns = common.create_policies(self.project_id, self.custom_policy)
+        policies = self.create_policies(self.custom_policy)
 
-        common.create_default_role_and_profile(self.project_id, policy_arns)
+        self.create_default_role_and_profile(policies)
 
         if self.schedule:
             print('Scheduling job using ' + self.schedule)
@@ -101,3 +130,31 @@ class EC2(object):
         self.launch_config['LaunchSpecification']['IamInstanceProfile'] = {'Name': self.project_id + '-default-role'}
 
         common.request_spot_instances(self.project_id, self.launch_config)
+
+    def create_default_role_and_profile(self, policies):
+        """ Creates default role and instance profile for EC2 deployment.
+        :param policies:                Policies to attach to default role
+        """
+        role_name = self.project_id + '-default-role'
+        common.create_role(role_name, DEFAULT_TRUST_POLICY, *policies)
+        common.create_instance_profile(role_name, role_name)
+
+    def create_policies(self, custom_policy):
+        """Creates policies for EMR related tasks"""
+        policies = []
+
+        # declare default policy settings
+        default_policy_name = self.project_id + '-default-policy'
+        default_policy_document = DEFAULT_POLICY.format(bucket=self.project_id)
+        common.create_policy(default_policy_name, default_policy_document)
+
+        policies.append(next(common.get_policies(default_policy_name)))
+
+        if custom_policy:
+            print('Creating custom policy')
+
+            custom_policy_name = self.project_id + '-custom-policy'
+            common.create_policy(custom_policy_name, custom_policy)
+            policies.append(next(common.get_policies(default_policy_name)).arn)
+
+        return policies
