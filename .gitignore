@@ -4,5 +4,6 @@ dist/
 *.zip
 .pylintrc
 .pypirc
+.idea
 __pycache__/
 bokchoi_settings.json
