@@ -6,7 +6,6 @@ import os
 import json
 import hashlib
 
-
 from bokchoi import ec2
 from bokchoi import emr
 
@@ -130,15 +129,15 @@ def upload_zip(bucket_name, zip_file, zip_file_name, fingerprint):
         cur_fingerprint = bucket.Object(zip_file_name).metadata.get('fingerprint')
     except ClientError as e:
         if e.response['Error']['Message'] == 'Not Found':
-            print('No package deployed yet. Uploading')
+            print('No package deployed yet. Uploading.')
         else:
             raise e
     else:
         if cur_fingerprint == fingerprint:
-            print('Package fingerprint matches previous, not uploading')
+            print('Local package matches deployed. Not uploading.')
             return
         else:
-            print('Updated local package detected. Uploading')
+            print('Local package does not match deployed. Uploading')
 
     bucket.put_object(Body=zip_file, Key=zip_file_name, Metadata={'fingerprint': fingerprint})
 
@@ -180,30 +179,32 @@ def create_instance_profile(profile_name, role_name=None):
                 InstanceProfileName=profile_name,
                 RoleName=role_name
             )
-
+        print('Created instance profile: ' + profile_name)
         return create_instance_profile_response['InstanceProfile']
 
 
-def create_policy(name, document):
+def create_policy(policy_name, document):
     """ Creates IAM policy
-    :param name:                    Name of policy to create
+    :param policy_name:             Name of policy to create
     :param document:                Policy document associated with policy
     """
     try:
-        iam_client.create_policy(PolicyName=name
+        iam_client.create_policy(PolicyName=policy_name
                                  , PolicyDocument=document)
     except ClientError as e:
         if e.response['Error']['Code'] == 'EntityAlreadyExists':
-            print('Policy already exists ' + name)
+            print('Policy already exists ' + policy_name)
         else:
             raise e
+    else:
+        print('Created policy: ' + policy_name)
 
 
 def create_role(role_name, trust_policy, *policies):
     """ Creates IAM role
     :param role_name:               Name of role to create
     :param trust_policy:            Trust policy to associate with role
-    :param policy_arns:             ARN(s) of 1 or more policies to attach to role
+    :param policies:                ARN(s) of 1 or more policies to attach to role
     :return:                        API response
     """
     try:
@@ -222,7 +223,7 @@ def create_role(role_name, trust_policy, *policies):
                 RoleName=role_name,
                 PolicyArn=policy.arn
             )
-
+        print('Created role: ' + role_name)
     return iam_resource.Role(role_name)
 
 
@@ -370,14 +371,23 @@ def delete_role(role):
     print('Successfully deleted role:', role_name)
 
 
-def get_policies(project_id):
+def get_policies(project_id, pattern=None):
     """ Yields all IAM policies associated with deployment
     :param project_id:              Global project id
+    :param pattern:                 Pattern to return specific policies (e.g. default-policy)
     :return:                        Boto3 policy resource
     """
     for policy in iam_resource.policies.filter(Scope='Local'):
-        if project_id in policy.policy_name:
-            yield policy
+
+        policy_name = policy.policy_name
+
+        if project_id not in policy_name:
+            continue
+
+        if pattern and pattern not in policy_name:
+            continue
+
+        yield policy
 
 
 def delete_policy(policy):
@@ -450,7 +460,7 @@ def create_scheduler(project_id, project, settings):
         zip_file.write(__file__, 'bokchoi/common.py')
         zip_file.write(ec2.__file__, 'bokchoi/ec2.py')
         zip_file.write(emr.__file__, 'bokchoi/emr.py')
-        zip_file.write('\\'.join((os.getcwd(), 'bokchoi_settings.json')), 'bokchoi_settings.json')
+        zip_file.write('/'.join((os.getcwd(), 'bokchoi_settings.json')), 'bokchoi_settings.json')
 
         zip_file.writestr('__init__.py', '')
 
@@ -463,11 +473,12 @@ def create_scheduler(project_id, project, settings):
     zip_file_name = 'bokchoi-scheduler.zip'
     upload_zip(bucket_name, file_object, zip_file_name, fingerprint='n/a')
 
-    policy_name = project_id + '-scheduler-policy'
-    policy_arn = create_policy(policy_name, SCHEDULER_POLICY)
+    scheduler_policy_name = project_id + '-scheduler-policy'
+    create_policy(scheduler_policy_name, SCHEDULER_POLICY)
+    scheduler_policy = next(get_policies(project_id, pattern=scheduler_policy_name))
 
-    role_name = project_id + '-scheduler-role'
-    role = create_role(role_name, SCHEDULER_TRUST_POLICY, policy_arn)
+    scheduler_role_name = project_id + '-scheduler-role'
+    role = create_role(scheduler_role_name, SCHEDULER_TRUST_POLICY, scheduler_policy)
 
     # AWS has some specific demands on cron schedule:
     # http://docs.aws.amazon.com/lambda/latest/dg/tutorial-scheduled-events-schedule-expressions.html
@@ -478,14 +489,15 @@ def create_scheduler(project_id, project, settings):
                             , bucket_name=bucket_name
                             , zip_file_name=zip_file_name)
 
-    policy_name = project_id + '-event-policy'
-    policy_arn = create_policy(policy_name, EVENT_POLICY)
+    event_policy_name = project_id + '-event-policy'
+    create_policy(event_policy_name, EVENT_POLICY)
+    event_policy = next(get_policies(project_id, pattern=event_policy_name))
 
-    role_name = project_id + '-event-role'
-    role = create_role(role_name, EVENT_TRUST_POLICY, policy_arn)
+    event_role_name = project_id + '-event-role'
+    event_role = create_role(event_role_name, EVENT_TRUST_POLICY, event_policy)
 
     schedule = settings['Schedule']
-    create_cloudwatch_rule(project_id, schedule, role.arn, lambda_function['FunctionArn'])
+    create_cloudwatch_rule(project_id, schedule, event_role.arn, lambda_function['FunctionArn'])
 
 
 def delete_scheduler(project_id):
@@ -508,6 +520,7 @@ def create_cloudwatch_rule(project_id, schedule, role_arn, function_arn):
     :param role_arn:                ARN of role to assign to rule
     :param function_arn:            ARN of Lambda function to trigger
     """
+    print('Scheduling job using ' + schedule)
     rule_name = project_id + '-schedule-event'
     retry(events_client.put_rule
           , Name=rule_name
