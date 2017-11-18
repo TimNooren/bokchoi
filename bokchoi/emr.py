@@ -24,7 +24,6 @@ class EMR(object):
     def schedule(self):
         """Schedule task"""
         if self.settings.get('Schedule'):
-            print('Scheduling job using ' + self.settings['Schedule'])
             common.create_scheduler(self.project_id, self.project_name, self.settings)
 
     def deploy(self):
