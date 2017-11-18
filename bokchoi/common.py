@@ -204,7 +204,7 @@ def create_role(role_name, trust_policy, *policies):
     """ Creates IAM role
     :param role_name:               Name of role to create
     :param trust_policy:            Trust policy to associate with role
-    :param policies:                ARN(s) of 1 or more policies to attach to role
+    :param policies:                Policies to attach to role
     :return:                        API response
     """
     try:
