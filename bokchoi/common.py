@@ -249,7 +249,7 @@ def request_spot_instances(project_id, settings):
 
 
 def cancel_spot_request(project_id):
-    """ Cancels spot instance request. Request is found by filtering on bokchoi-id tag.
+    """ Cancels spot instance request. Request is found by filtering on project_id tag.
     :param project_id:              Global project id
     """
     print('\nCancelling spot request')
@@ -271,7 +271,7 @@ def cancel_spot_request(project_id):
 
 
 def terminate_instances(project_id):
-    """ Terminates instances. Instances are found by filtering on bokchoi-id tag.
+    """ Terminates instances. Instances are found by filtering on project_id tag.
     :param project_id:              Global project id
     """
     print('\nTerminating instances')
