@@ -92,8 +92,10 @@ class EC2(object):
         self.create_default_role_and_profile(policies)
 
         if self.schedule:
-            print('Scheduling job using ' + self.schedule)
             common.create_scheduler(self.project_id, self.project_name, self.settings)
+        else:
+            common.delete_scheduler(self.project_id)
+            common.delete_cloudwatch_rule(self.project_id + '-schedule-event')
 
     def undeploy(self):
         """Deletes all policies, users, and instances permanently"""
@@ -113,13 +115,11 @@ class EC2(object):
             common.delete_role(role)
 
         common.delete_scheduler(self.project_id)
-
-        rule_name = self.project_id + '-schedule-event'
-        common.delete_cloudwatch_rule(rule_name)
+        common.delete_cloudwatch_rule(self.project_id + '-schedule-event')
 
     def run(self):
         """Create EC2 machine with given AMI and instance settings"""
-        print("Running EC2 instance")
+        print("Starting EC2 instance")
 
         bucket_name = self.project_id
 
