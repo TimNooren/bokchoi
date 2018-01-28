@@ -180,9 +180,10 @@ def request_spot_instances(project_id, settings):
     ec2_client.create_tags(Resources=instance_ids, Tags=[{'Key': 'bokchoi-id', 'Value': project_id}])
 
 
-def cancel_spot_request(project_id):
+def cancel_spot_request(project_id, dryrun):
     """ Cancels spot instance request. Request is found by filtering on project_id tag.
     :param project_id:              Global project id
+    :param dryrun:                  If true list id's of spot requests to cancel
     """
     print('\nCancelling spot request')
     filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(project_id)]}
@@ -190,6 +191,10 @@ def cancel_spot_request(project_id):
     response = ec2_client.describe_spot_instance_requests(Filters=filters)
 
     spot_request_ids = [request['SpotInstanceRequestId'] for request in response['SpotInstanceRequests']]
+
+    if dryrun:
+        print('Dryrun flag set. Would have cancelled spot requests ' + ', '.join(spot_request_ids))
+        return
 
     try:
         ec2_client.cancel_spot_instance_requests(SpotInstanceRequestIds=spot_request_ids)
@@ -201,23 +206,37 @@ def cancel_spot_request(project_id):
             raise e
 
 
-def terminate_instances(project_id):
+def terminate_instances(project_id, dryrun=True):
     """ Terminates instances. Instances are found by filtering on project_id tag.
     :param project_id:              Global project id
+    :param dryrun:                  If True list instances that would be terminated
     """
     print('\nTerminating instances')
-    filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(project_id)]}]
-    ec2_resource.instances.filter(Filters=filters).terminate()
-    print('Instances terminated')
+    filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(project_id)]},
+               {'Name': 'instance-state-name', 'Values': ['pending', 'running', 'stopping', 'stopped']}]
+    instances = ec2_resource.instances.filter(Filters=filters)
+
+    if dryrun:
+        print('Dryrun flag set. Would have terminated following instances:')
+        for instance in instances:
+            print(instance)
+    else:
+        instances.terminate()
+        print('Instances terminated')
 
 
-def delete_bucket(project_id):
+def delete_bucket(project_id, dryrun=True):
     """ Delete Bokchoi deploy bucket. Removes all object it contains.
     :param project_id:              Global project id
+    :param dryrun:                  If True list bucket that would be terminated
     """
     print('\nDelete Bucket')
 
     bucket = s3_resource.Bucket(project_id)
+
+    if dryrun:
+        print('Dryrun flag set. Would have deleted bucket ' + bucket.name)
+        return
 
     try:
         bucket.objects.delete()
@@ -238,12 +257,17 @@ def get_instance_profiles(project_id):
             yield instance_profile
 
 
-def delete_instance_profile(instance_profile):
+def delete_instance_profile(instance_profile, dryrun):
     """ Deletes instance profile. First removes all roles attached to instance profile.
     :param instance_profile:        Name of instance profile
+    :param: dryrun:                 If true print name of instance profile to delete
     """
     instance_profile_name = instance_profile.instance_profile_name
     print('\nDeleting Instance Profile:', instance_profile_name)
+
+    if dryrun:
+        print('Dryrun flag set. Would have deleted instance profile ' + instance_profile_name)
+        return
 
     try:
         for role in instance_profile.roles_attribute:
@@ -275,12 +299,17 @@ def get_roles(project_id):
             yield role
 
 
-def delete_role(role):
+def delete_role(role, dryrun):
     """ Deletes IAM role. First detaches all polices from role
     :param role:                    Boto3 Role resource
+    :param dryrun:                  If true print name of role to delete
     """
     role_name = role.role_name
     print('\nDeleting Role:', role_name)
+
+    if dryrun:
+        print('Dryrun flag set. Would have deleted role ' + role_name)
+        return
 
     try:
         for policy in role.attached_policies.all():
@@ -321,12 +350,17 @@ def get_policies(project_id, pattern=None):
         yield policy
 
 
-def delete_policy(policy):
+def delete_policy(policy, dryrun):
     """ Deletes IAM policy. First detaches all roles from policy.
     :param policy:                  Boto3 policy resource
+    :param dryrun:                  If true print name of policy to delete
     """
     policy_name = policy.policy_name
     print('\nDeleting Policy:', policy_name)
+
+    if dryrun:
+        print('Dryrun flag set. Would have deleted policy ' + policy_name)
+        return
 
     try:
         for role in policy.attached_roles.all():
@@ -386,8 +420,8 @@ def zip_package(path, requirements=None):
                 fn = os.path.join(base, file_name)
                 zip_file.write(fn, fn[rootlen:])
 
-        if requirements:
-            zip_file.writestr('requirements.txt', '\n'.join(requirements))
+        requirements = requirements or ''
+        zip_file.writestr('requirements.txt', '\n'.join(requirements))
 
         fingerprint = '|'.join([str(elem.CRC) for elem in zip_file.infolist()])
 
