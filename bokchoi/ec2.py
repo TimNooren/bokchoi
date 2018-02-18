@@ -163,6 +163,6 @@ class EC2(object):
 
             custom_policy_name = self.project_id + '-custom-policy'
             common.create_policy(custom_policy_name, custom_policy)
-            policies.append(next(common.get_policies(default_policy_name)))
+            policies.append(next(common.get_policies(custom_policy_name)))
 
         return policies
