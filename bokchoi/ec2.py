@@ -107,8 +107,10 @@ class EC2(object):
         self.create_default_role_and_profile(policies)
 
         if self.settings.get('Notebook'):
+            subnet = common.get_subnet(self.launch_config['LaunchSpecification']['SubnetId'])
             common.create_security_group(self.project_id + '-default'
                                          , self.project_id
+                                         , subnet.vpc_id
                                          , {'CidrIp': common.get_my_ip() + '/32'
                                             , 'FromPort': 22
                                             , 'ToPort': 22
@@ -222,7 +224,7 @@ class EC2(object):
         """Set up port forwarding for ipython notebook server"""
         instance = next(common.get_instances(self.project_id))
         instance_ip = instance.public_ip_address or instance.private_ip_address
-        key_file = os.path.expanduser('~/.ssh/' + self.project_id)
+        key_file = os.path.join(os.path.expanduser('~'), '.ssh', self.project_id)
         ssh.forward(8888, instance_ip, 'ubuntu', key_file)
 
     def stop(self):
