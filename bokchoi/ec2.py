@@ -29,9 +29,11 @@ then
     echo "ssh-rsa {public_key}" >> /home/ubuntu/.ssh/authorized_keys
     #Install Jupyter
     pip3 install jupyter
+    pip3 install jupyterlab
+    jupyter serverextension enable --py jupyterlab --sys-prefix
     pip3 install tornado==4.5.2
     echo "c.NotebookApp.token = u''" >> ~/.jupyter/jupyter_notebook_config.py
-    jupyter notebook --no-browser --allow-root --ip=0.0.0.0 --port=8888 --NotebookApp.token=
+    jupyter lab --no-browser --allow-root --ip=0.0.0.0 --port=8888 --NotebookApp.token=
 else
     # Run app
     cd /tmp
