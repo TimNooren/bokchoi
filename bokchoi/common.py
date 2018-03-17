@@ -117,18 +117,17 @@ def create_security_group(group_name, project_id, vpc_id, *rules):
 
 
 def get_security_groups(project_id, *group_names):
+
+    filters = [{'Name': 'tag-key',
+                'Values': ['bokchoi-id']},
+               {'Name': 'tag-value',
+                'Values': [project_id]}]
+
+    if group_names:
+        filters.append({'Name': 'group-name', 'Values': [*group_names]})
+
     response = ec2_client.describe_security_groups(
-        Filters=[
-            {
-                'Name': 'tag-key',
-                'Values': ['bokchoi-id']
-            },
-            {
-                'Name': 'tag-value',
-                'Values': [project_id]
-            }
-        ],
-        GroupNames=[*group_names]
+        Filters=filters
     )
 
     for group in response['SecurityGroups']:

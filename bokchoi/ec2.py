@@ -188,7 +188,11 @@ class EC2(object):
 
         if self.settings.get('Notebook'):
             security_group = next(common.get_security_groups(self.project_id, self.project_id + '-default'))
-            self.launch_config['LaunchSpecification']['SecurityGroupIds'] = [security_group.group_id]
+
+            if self.launch_config['LaunchSpecification'].get('SecurityGroupIds'):
+                self.launch_config['LaunchSpecification']['SecurityGroupIds'] += [security_group.group_id]
+            else:
+                self.launch_config['LaunchSpecification']['SecurityGroupIds'] = [security_group.group_id]
 
         common.request_spot_instances(self.project_id, self.launch_config)
 
