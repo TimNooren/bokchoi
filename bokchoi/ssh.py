@@ -95,7 +95,11 @@ def get_ssh_keys(project_id):
     :param project_id:          Project id used for private key name
     :return:                    -
     """
-    key_file = os.path.expanduser('~/.ssh/' + project_id)
+    ssh_dir = os.path.join(os.path.expanduser('~'), '.ssh')
+    if not os.path.exists(ssh_dir):
+        os.makedirs(ssh_dir)
+
+    key_file = os.path.join(ssh_dir, project_id)
     try:
         priv = RSAKey.from_private_key_file(key_file)
     except FileNotFoundError:

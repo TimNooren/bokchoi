@@ -91,11 +91,16 @@ def retry(func, exc, **kwargs):
     raise TimeoutError()
 
 
-def create_security_group(group_name, project_id, *rules):
+def get_subnet(subnet_id):
+    return ec2_resource.Subnet(subnet_id)
+
+
+def create_security_group(group_name, project_id, vpc_id, *rules):
     try:
         group = ec2_resource.create_security_group(
             Description='Bokchoi default security group',
-            GroupName=group_name
+            GroupName=group_name,
+            VpcId=vpc_id
         )
     except ClientError as e:
         if e.response['Error']['Code'] == 'InvalidGroup.Duplicate':
@@ -112,18 +117,17 @@ def create_security_group(group_name, project_id, *rules):
 
 
 def get_security_groups(project_id, *group_names):
+
+    filters = [{'Name': 'tag-key',
+                'Values': ['bokchoi-id']},
+               {'Name': 'tag-value',
+                'Values': [project_id]}]
+
+    if group_names:
+        filters.append({'Name': 'group-name', 'Values': [*group_names]})
+
     response = ec2_client.describe_security_groups(
-        Filters=[
-            {
-                'Name': 'tag-key',
-                'Values': ['bokchoi-id']
-            },
-            {
-                'Name': 'tag-value',
-                'Values': [project_id]
-            }
-        ],
-        GroupNames=[*group_names]
+        Filters=filters
     )
 
     for group in response['SecurityGroups']:
