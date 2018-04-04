@@ -5,7 +5,7 @@ import zipfile
 import os
 import json
 import hashlib
-import requests
+import urllib.request
 
 import boto3
 from botocore.exceptions import ClientError
@@ -147,7 +147,8 @@ def delete_security_group(group, dryrun=True):
 
 
 def get_my_ip():
-    return requests.get('https://api.ipify.org/').text
+    with urllib.request.urlopen('https://api.ipify.org/') as response:
+        return response.read().decode('utf8')
 
 
 def create_instance_profile(profile_name, role_name=None):

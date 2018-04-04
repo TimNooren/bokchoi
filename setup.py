@@ -11,14 +11,13 @@ except ImportError:
 
 setup(
     name="bokchoi",
-    version="0.2.7",
+    version="0.2.8",
     packages=['bokchoi'],
     install_requires=[
         'Click',
         'boto3',
         'botocore',
-        'paramiko',
-        'requests'
+        'paramiko'
     ],
     url='https://github.com/TimNooren/bokchoi',
     author='Tim Nooren',
