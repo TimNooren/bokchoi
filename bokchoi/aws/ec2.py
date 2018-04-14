@@ -2,10 +2,12 @@
 """
 Class which can be used to deploy and run EC2 spot instances
 """
-from base64 import b64encode
 import os
+from base64 import b64encode
 
-from bokchoi import common, ssh
+from bokchoi import utils
+from bokchoi.ssh import SSH
+from bokchoi.aws import common
 
 USER_DATA = """#!/bin/bash
 
@@ -37,7 +39,7 @@ then
 else
     # Run app
     cd /tmp
-    python3 -c "import {app}; {app}.{entry}();"
+    python3 {app}
     aws s3 cp /var/log/cloud-init-output.log s3://{bucket}/cloud-init-output.log
     if [ "{shutdown}" = "True" ]
     then
@@ -76,58 +78,58 @@ DEFAULT_POLICY = """{{
 }}"""
 
 
-class EC2(object):
+class EC2:
     """Create EC2 object which can be used to schedule jobs"""
-    def __init__(self, project, settings):
-        self.settings = settings
-        self.project_name = project
-        self.requirements = settings.get('Requirements')
-        self.region = settings.get('Region')
-        self.entry_point = settings.get('EntryPoint')
-        self.launch_config = settings.get('EC2')
-        self.custom_policy = settings.get('CustomPolicy')
+    def __init__(self, project_name, config):
 
-        self.shutdown = settings.get('Shutdown', True)
+        self._name = project_name
+        self.config = config
 
-        aws_account_id = common.get_aws_account_id()
-        self.project_id = common.create_project_id(project, aws_account_id)
-        self.package_name = 'bokchoi-' + self.project_name + '.zip'
+        self.launch_spec = config.ec2['LaunchSpecification']
+        self.subnet = common.get_subnet(self.launch_spec['SubnetId'])
 
-        self.schedule = settings.get('Schedule')
+        self.project_id = utils.create_project_id(project_name, common.get_aws_account_id())
+        self.package_name = 'bokchoi-' + project_name + '.zip'
 
-    def deploy(self):
+        if self.config.connect:
+            self.ssh = SSH(self.project_id)
+
+    @property
+    def default_config(self):
+        return {'Platform': 'EC2',
+                'Notebook': True,
+                'Entrypoint': '',
+                'EC2': {
+                    'Region': '',
+                    'SpotPrice': '',
+                    'LaunchSpecification': {
+                      'ImageId': '',
+                      'InstanceType': '',
+                      'SubnetId': ''
+                    }
+                  }
+                }
+
+    def deploy(self, path=''):
         """Zip package and deploy to S3"""
 
-        bucket_name = common.create_bucket(self.region, self.project_id)
+        bucket_name = common.create_bucket(self.config.ec2['Region'], self.project_id)
 
-        cwd = os.getcwd()
-        package, fingerprint = common.zip_package(cwd, self.requirements)
+        package, fingerprint = utils.zip_package(path or os.getcwd(), self.config.requirements)
         common.upload_to_s3(bucket_name, package, self.package_name, fingerprint)
 
-        policies = self.create_policies(self.custom_policy)
+        policies = self.create_policies(self.config.ec2.get('CustomPolicy'))
 
         self.create_default_role_and_profile(policies)
 
-        if self.settings.get('Notebook'):
-            subnet = common.get_subnet(self.launch_config['LaunchSpecification']['SubnetId'])
-            common.create_security_group(self.project_id + '-default'
-                                         , self.project_id
-                                         , subnet.vpc_id
-                                         , {'CidrIp': common.get_my_ip() + '/32'
-                                            , 'FromPort': 22
-                                            , 'ToPort': 22
-                                            , 'IpProtocol': 'tcp'}
-                                         )
-
-        if self.settings.get('Schedule'):
-
-            from bokchoi.scheduler import Scheduler
-
-            scheduler = Scheduler(self.project_id
-                                  , self.project_name
-                                  , self.settings.get('Schedule')
-                                  , self.settings.get('Requirements'))
-            scheduler.deploy()
+        common.create_security_group(self.project_id
+                                     , self.project_id
+                                     , self.subnet.vpc_id
+                                     , {'CidrIp': utils.get_my_ip() + '/32'
+                                        , 'FromPort': 22
+                                        , 'ToPort': 22
+                                        , 'IpProtocol': 'tcp'}
+                                     )
 
     def undeploy(self, dryrun):
         """Deletes all policies, users, and instances permanently"""
@@ -151,58 +153,39 @@ class EC2(object):
         for group in common.get_security_groups(self.project_id):
             common.delete_security_group(group, dryrun)
 
-        from bokchoi.scheduler import Scheduler
-
-        scheduler = Scheduler(self.project_id
-                              , self.project_name
-                              , self.settings.get('Schedule')
-                              , self.settings.get('Requirements'))
-        scheduler.undeploy(dryrun)
-
     def run(self):
         """Create EC2 machine with given AMI and instance settings"""
-        print("Starting EC2 instance")
 
-        bucket_name = self.project_id
-
-        if self.settings.get('Notebook'):
-            public_key = ssh.get_ssh_keys(self.project_id)
+        if self.config.connect:
+            public_key = self.ssh.public_key
         else:
             public_key = ''
 
-        if self.entry_point:
-            app, entry = self.entry_point.split('.')
-        else:
-            app, entry = '', ''
-
-        user_data = USER_DATA.format(bucket=bucket_name
+        if self.config.connect:
+            security_group = next(common.get_security_groups(self.project_id, self.project_id))
+            if self.launch_spec.get('SecurityGroupIds'):
+                self.launch_spec['SecurityGroupIds'] += [security_group.group_id]
+            else:
+                self.launch_spec['SecurityGroupIds'] = [security_group.group_id]
+        print(public_key)
+        user_data = USER_DATA.format(bucket=self.project_id
                                      , package=self.package_name
-                                     , app=app
-                                     , entry=entry
+                                     , app=self.config.app
                                      , public=public_key
-                                     , shutdown=self.shutdown
-                                     , notebook=self.settings.get('Notebook')
+                                     , shutdown=self.config.shutdown
+                                     , notebook=self.config.connect
                                      , public_key=public_key)
 
-        self.launch_config['LaunchSpecification']['UserData'] = b64encode(user_data.encode('ascii')).decode('ascii')
+        self.launch_spec['UserData'] = b64encode(user_data.encode('ascii')).decode('ascii')
+        self.launch_spec['IamInstanceProfile'] = {'Name': self.project_id}
 
-        self.launch_config['LaunchSpecification']['IamInstanceProfile'] = {'Name': self.project_id + '-default-role'}
-
-        if self.settings.get('Notebook'):
-            security_group = next(common.get_security_groups(self.project_id, self.project_id + '-default'))
-
-            if self.launch_config['LaunchSpecification'].get('SecurityGroupIds'):
-                self.launch_config['LaunchSpecification']['SecurityGroupIds'] += [security_group.group_id]
-            else:
-                self.launch_config['LaunchSpecification']['SecurityGroupIds'] = [security_group.group_id]
-
-        common.request_spot_instances(self.project_id, self.launch_config)
+        common.request_spot_instances(self.project_id, self.launch_spec, self.config.ec2['SpotPrice'])
 
     def create_default_role_and_profile(self, policies):
         """ Creates default role and instance profile for EC2 deployment.
         :param policies:                Policies to attach to default role
         """
-        role_name = self.project_id + '-default-role'
+        role_name = self.project_id
         common.create_role(role_name, DEFAULT_TRUST_POLICY, *policies)
         common.create_instance_profile(role_name, role_name)
 
@@ -226,17 +209,22 @@ class EC2(object):
 
         return policies
 
-    def connect(self):
-        """Set up port forwarding for ipython notebook server"""
+    def connect(self, local_port, remote_port):
+        """Set up port forwarding to remote server"""
         instance = next(common.get_instances(self.project_id))
         instance_ip = instance.public_ip_address or instance.private_ip_address
-        key_file = os.path.join(os.path.expanduser('~'), '.ssh', self.project_id)
-        ssh.forward(8888, instance_ip, 'ubuntu', key_file)
+        self.ssh.forward(local_port or 8888, instance_ip, remote_port or 8888, 'ubuntu')
 
-    def stop(self):
+    def stop(self, dryrun=False):
         """Stop all running instances"""
-        dryrun = False
         common.cancel_spot_request(self.project_id, dryrun)
 
         for instance in common.get_instances(self.project_id):
             common.terminate_instance(instance, dryrun)
+
+    def status(self):
+        """Status of current deployment"""
+        print('\nStatus:')
+        for instance in common.get_instances(self.project_id):
+            print('\t' + instance.instance_id + ' : ' + instance.state['Name'])
+        print()

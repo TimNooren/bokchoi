@@ -4,15 +4,14 @@ Module contains functions related to SSH.
 Most of this script is adapted from:
 https://github.com/paramiko/paramiko/blob/master/demos/forward.py
 """
-import webbrowser
-import select
 import os
+import select
 import socketserver
 
 from paramiko import RSAKey, SSHClient, AutoAddPolicy
 from paramiko.ssh_exception import SSHException
 
-from bokchoi import common
+from bokchoi import utils
 
 
 class ForwardServer(socketserver.ThreadingTCPServer):
@@ -24,6 +23,7 @@ class Handler(socketserver.BaseRequestHandler):
 
     ssh_transport = None
     host_port = None
+    remote_port = None
 
     def __init__(self, request, client_address, server):
         super(Handler, self).__init__(request, client_address, server)
@@ -31,8 +31,8 @@ class Handler(socketserver.BaseRequestHandler):
     def handle(self):
 
         channel = self.ssh_transport.open_channel('direct-tcpip',
-                                                 ('localhost', 8888),
-                                                 ('localhost', self.host_port))
+                                                  ('localhost', self.remote_port),
+                                                  ('localhost', self.host_port))
         if not channel:
             print('Incoming request was rejected')
             return
@@ -54,57 +54,61 @@ class Handler(socketserver.BaseRequestHandler):
         self.request.close()
 
 
-def forward(local_port, remote_host, user_name, key_filename):
-    """ Sets up port forwarding to remote host
-    :param local_port:              Local port to forward to
-    :param remote_host:             Remote host
-    :param user_name:               User to use in ssh connection
-    :param key_filename:            Private key for ssh connection
-    :return:                        -
-    """
-    client = SSHClient()
-    client.load_system_host_keys()
-    client.set_missing_host_key_policy(AutoAddPolicy())
+class SSH(object):
 
-    print('Connecting to ssh host {}:{} ...'.format(remote_host, 8888))
+    def __init__(self, private_key_name):
+        self.client = SSHClient()
+        self.client.load_system_host_keys()
+        self.client.set_missing_host_key_policy(AutoAddPolicy())
 
-    common.retry(client.connect
-                 , SSHException
-                 , hostname=remote_host
-                 , port=22
-                 , username=user_name
-                 , key_filename=key_filename)
+        self.public_key, self.key_file_path = self._maybe_generate_keys(private_key_name)
 
-    class SubHandler(Handler):
-        ssh_transport = client.get_transport()
-        host_port = local_port
+    def forward(self, local_port, remote_host, remote_po, user_name):
+        """ Sets up port forwarding to remote host
+        :param local_port:              Local port to forward to
+        :param remote_host:             Remote host
+        :param remote_port:             Remote port
+        :param user_name:               User to use in ssh connection
+        :return:                        -
+        """
 
-    server = ForwardServer(('localhost', local_port), SubHandler)
+        print('Connecting to ssh host {}:{} ...'.format(remote_host, remote_po))
 
-    try:
-        webbrowser.open('http://localhost:{}'.format(local_port))
-        server.serve_forever()
-    except KeyboardInterrupt:
-        server.shutdown()
-        server.server_close()
-        print('Connection closed')
+        utils.retry(self.client.connect
+                    , SSHException
+                    , hostname=remote_host
+                    , port=22
+                    , username=user_name
+                    , key_filename=self.key_file_path)
 
+        class SubHandler(Handler):
+            ssh_transport = self.client.get_transport()
+            host_port = local_port
+            remote_port = remote_po
 
-def get_ssh_keys(project_id):
-    """Get private and public keys. Create if not exists.
-    :param project_id:          Project id used for private key name
-    :return:                    -
-    """
-    ssh_dir = os.path.join(os.path.expanduser('~'), '.ssh')
-    if not os.path.exists(ssh_dir):
-        os.makedirs(ssh_dir)
+        server = ForwardServer(('localhost', local_port), SubHandler)
 
-    key_file = os.path.join(ssh_dir, project_id)
-    try:
-        priv = RSAKey.from_private_key_file(key_file)
-    except FileNotFoundError:
-        print('Could not find private key. Creating one.')
-        priv = RSAKey.generate(2048)
-        priv.write_private_key_file(key_file)
-    pub = priv.get_base64()
-    return pub
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            server.shutdown()
+            server.server_close()
+            print('Connection closed')
+
+    def _maybe_generate_keys(self, private_key_name):
+        """Get private and public keys. Create if not exists.
+        :return:                    Public key
+        """
+        ssh_dir = os.path.join(os.path.expanduser('~'), '.ssh')
+        if not os.path.exists(ssh_dir):
+            os.makedirs(ssh_dir)
+
+        key_file_path = os.path.join(ssh_dir, private_key_name)
+        try:
+            priv = RSAKey.from_private_key_file(key_file_path)
+        except FileNotFoundError:
+            print('Could not find private key. Creating one.')
+            priv = RSAKey.generate(2048)
+            priv.write_private_key_file(key_file_path)
+        pub = priv.get_base64()
+        return pub, key_file_path

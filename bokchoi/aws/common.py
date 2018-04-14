@@ -1,12 +1,4 @@
 
-from time import sleep
-from io import BytesIO
-import zipfile
-import os
-import json
-import hashlib
-import urllib.request
-
 import boto3
 from botocore.exceptions import ClientError
 
@@ -74,23 +66,6 @@ def upload_to_s3(bucket_name, file_object, file_name, fingerprint):
     bucket.put_object(Body=file_object, Key=file_name, Metadata={'fingerprint': fingerprint})
 
 
-def retry(func, exc, **kwargs):
-    """ Retries boto3 function call in case a ClientError occurs
-    :param func:                    Function to call
-    :param exc:                     Exception to catch
-    :param kwargs:                  Parameters to pass to function
-    :return:                        Function response
-    """
-    for _ in range(60):
-        try:
-            response = func(**kwargs)
-            return response
-        except exc:
-            sleep(1)
-
-    raise TimeoutError()
-
-
 def get_subnet(subnet_id):
     return ec2_resource.Subnet(subnet_id)
 
@@ -144,11 +119,6 @@ def delete_security_group(group, dryrun=True):
     group.delete()
 
     print('Deleted security group ' + group_name)
-
-
-def get_my_ip():
-    with urllib.request.urlopen('https://api.ipify.org/') as response:
-        return response.read().decode('utf8')
 
 
 def create_instance_profile(profile_name, role_name=None):
@@ -221,12 +191,14 @@ def create_role(role_name, trust_policy, *policies):
     return iam_resource.Role(role_name)
 
 
-def request_spot_instances(project_id, settings):
+def request_spot_instances(project_id, launch_spec, spot_price):
     """ Create spot instance request
-    :param project_id:              Global project id
-    :param settings:                Settings to pass to request
+    :param project_id:                  Global project id
+    :param launch_spec:                 EC2 launch specification
+    :param spot_price:                  Max price to bid for spot instance
     """
-    response = ec2_client.request_spot_instances(**settings)
+    response = ec2_client.request_spot_instances(LaunchSpecification=launch_spec
+                                                 , SpotPrice=spot_price)
 
     spot_request_id = response['SpotInstanceRequests'][0]['SpotInstanceRequestId']
 
@@ -450,51 +422,3 @@ def delete_policy(policy, dryrun):
             raise e
 
     print('Successfully deleted Policy:', policy_name)
-
-
-def create_project_id(project, vendor_specific_id):
-    """Creates project id by hashing vendor specific id and project name"""
-    return 'bokchoi-' + hashlib.sha1((vendor_specific_id + project).encode()).hexdigest()
-
-
-def load_settings(project_name):
-    """ Loads settings from bokchoi_settings.json. Looking for settings under
-    the project name as a key on the lowest level
-    :param project_name:            Name of project
-    :return:                        Settings
-    """
-    with open('bokchoi_settings.json', 'r') as settings_file:
-
-        settings = json.load(settings_file)
-
-        try:
-            return settings[project_name]
-        except KeyError:
-            raise KeyError('No config found for {} in bokchoi_settings'.format(project_name))
-
-
-def zip_package(path, requirements=None):
-    """ Creates deployment package by zipping the project directory. Writes requirements to requirements.txt
-    if specified in settings
-    :param path:                    Path to project directory
-    :param requirements:            List of python requirements
-    :return:                        Zip file
-    """
-    file_object = BytesIO()
-
-    rootlen = len(path) + 1
-
-    with zipfile.ZipFile(file_object, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for base, _, files in os.walk(path):
-            for file_name in files:
-                fn = os.path.join(base, file_name)
-                zip_file.write(fn, fn[rootlen:])
-
-        requirements = requirements or ''
-        zip_file.writestr('requirements.txt', '\n'.join(requirements))
-
-        fingerprint = '|'.join([str(elem.CRC) for elem in zip_file.infolist()])
-
-    file_object.seek(0)
-
-    return file_object, fingerprint
