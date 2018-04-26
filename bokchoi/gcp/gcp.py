@@ -6,21 +6,12 @@ Can be used to run Bokchoi on the Google Cloud using Google Compute Engines
 import os
 import sys
 import time
-import json
-import logging
 import bokchoi.utils
 
 import googleapiclient.discovery
 import googleapiclient.errors
 
 from google.cloud import storage, exceptions
-
-
-# todo: init logger in other module
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-logging.basicConfig(handlers=[logging.StreamHandler()])
-logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 
 
 class GCP(object):
@@ -158,7 +149,7 @@ class GCP(object):
 
     def create_instance(self):
         """Create a new compute engine"""
-        logger.info('Creating instance')
+        print('Creating instance')
         try:
             return self.compute.instances().insert(
                 project=self.gcp.get('project'),
@@ -166,15 +157,15 @@ class GCP(object):
                 body=self.define_instance_config()).execute()
         except googleapiclient.errors.HttpError as e:
             if 'already exists' in str(e):
-                logger.error('instance with name {} already exists. exit(1)'.format(self.project_name))
+                print('instance with name {} already exists. exit(1)'.format(self.project_name))
                 sys.exit(1)
             else:
-                logger.error(e)
+                print(e)
                 sys.exit(1)
 
     def delete_instance(self):
         """Remove the created compute engine"""
-        logger.info('Deleting instance')
+        print('Deleting instance')
         return self.compute.instances().delete(
             project=self.gcp.get('project'),
             zone=self.gcp.get('zone'),
@@ -188,7 +179,7 @@ class GCP(object):
         if operation is None:
             return
 
-        logger.info('Waiting for operation to finish...')
+        print('Waiting for operation to finish...')
         while True:
             result = self.compute.zoneOperations().get(
                 project=self.gcp.get('project'),
@@ -204,25 +195,24 @@ class GCP(object):
 
     def create_bucket(self):
         """Create a new storage bucket which will be used for the defined job"""
-        logger.info('Creating bucket')
+        print('Creating bucket')
         try:
             bucket = self.storage.create_bucket(self.gcp.get('bucket'))
             return bucket
         except exceptions.Conflict as e:
             if 'You already own this bucket' in str(e):
-                logger.info('Bucket with name {} already exists, skipping bucket create step.')
+                print('Bucket with name {} already exists, skipping create.'.format(self.gcp.get('bucket')))
             else:
-                logger.error(e)
+                print(e)
 
     def delete_bucket(self):
         """Delete the created bucket"""
-        logger.info('Deleting bucket')
+        print('Deleting bucket')
         bucket = self.storage.get_bucket(self.gcp.get('bucket'))
         try:
             bucket.delete(force=True)
         except Exception as ignore:
-            # todo: make less generic (google.api_core.exceptions.NotFound)
-            logger.info('bucket does not exist, skipping deletion')
+            print('bucket does not exist, skipping deletion')
 
     def upload_blob(self, file_name, file_object):
         """Upload file to Google Storage
@@ -237,7 +227,7 @@ class GCP(object):
 
     def deploy(self):
         """Deploy package to GCP/Google Storage"""
-        logger.info('Uploading package to Google Storage bucket')
+        print('Uploading package to Google Storage bucket')
         self.create_bucket()
         cwd = os.getcwd()
         package, fingerprint = bokchoi.utils.zip_package(cwd, self.requirements)
@@ -245,16 +235,16 @@ class GCP(object):
 
     def undeploy(self):
         """Undeploy and delete all create d resources"""
-        logger.info('Deleting resources which are created on GCP')
+        print('Deleting resources which are created on GCP')
         self.delete_bucket()
 
         delete_instance_op = self.delete_instance()
         self.wait_for_operation(delete_instance_op)
-        logger.info('Successfully deleted resources')
+        print('Successfully deleted resources')
 
     def run(self):
         """Run the uploaded package"""
         create_instance_op = self.create_instance()
         self.wait_for_operation(create_instance_op)
-        logger.info('Successfully created instance and started application')
+        print('Successfully created instance and started application')
 
