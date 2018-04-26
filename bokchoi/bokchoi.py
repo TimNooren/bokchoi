@@ -1,12 +1,13 @@
 
 from bokchoi.config import Config
 from bokchoi.aws import EMR, EC2
+from bokchoi.gcp import GCP
 from bokchoi.utils import Response
 
 
 class Bokchoi:
 
-    backends = {'EC2': EC2, 'EMR': EMR}
+    backends = {'EC2': EC2, 'EMR': EMR, 'GCP': GCP}
 
     def __init__(self, name, path):
 

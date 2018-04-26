@@ -6,6 +6,7 @@ Can be used to run Bokchoi on the Google Cloud using Google Compute Engines
 import os
 import sys
 import time
+import json
 import logging
 import bokchoi.utils
 
@@ -54,19 +55,23 @@ class GCP(object):
         Checks the given settings and validates if all required values
         are there and the values are correct.
         :arg settings: a json file with with defined settings
-        :return:
+        :return: a python dict with renamed input parameters + defaults
         """
-        # todo: create try/catch to handle input (or move to other class)
-        # settings.map(lambda x: if x is None raise Exception())
-
         gcp = settings.get('GCP')
+
+        def check_none(v):
+            if not gcp.get(v):
+                raise Exception('{} is required, please add it to the config'.format(v))
+
+        required = ['ProjectId', 'AuthKeyLocation', 'Bucket']
+        [check_none(v) for v in required]
 
         return {
             'project': gcp.get('ProjectId'),
-            'region': gcp.get('Region', 'europe-west4'),
-            'zone': gcp.get('Zone', 'europe-west4-b'),
             'auth_key': gcp.get('AuthKeyLocation'),
             'bucket': gcp.get('Bucket'),
+            'region': gcp.get('Region', 'europe-west4'),
+            'zone': gcp.get('Zone', 'europe-west4-b'),
             'network': gcp.get('Network', 'default'),
             'sub_network': gcp.get('SubNetwork', 'default'),
             'instance_type': gcp.get('InstanceType', 'n1-standard-1'),
@@ -83,7 +88,7 @@ class GCP(object):
         [instances.append(x['name']) for x in result['items']]
         return instances
 
-    def define_config(self):
+    def define_instance_config(self):
         """
         Set up a compute engine configuration based on the user's input
         :return: Defined Compute Engine configuration
@@ -95,7 +100,7 @@ class GCP(object):
             self.gcp.get('zone'), self.gcp.get('instance_type'))
 
         startup_script = open(
-            os.path.join(os.path.dirname(__file__), 'scripts/gcp-startup-script.sh'), 'r').read()
+            os.path.join(os.path.dirname(__file__), '../scripts/gcp-startup-script.sh'), 'r').read()
 
         config = {
             'name': self.project_name,
@@ -137,13 +142,13 @@ class GCP(object):
                     'key': 'startup-script',
                     'value': startup_script
                 }, {
-                    'key': 'BUCKET_NAME',
+                    'key': 'bucket_name',
                     'value': self.gcp.get('bucket')
                 }, {
-                    'key': 'PACKAGE_NAME',
+                    'key': 'package_name',
                     'value': '{}-{}.zip'.format(self.project_name, 'package')
                 }, {
-                    'key': 'ENTRYPOINT',
+                    'key': 'entry_point',
                     'value': self.entry_point
                 }]
             }
@@ -158,10 +163,10 @@ class GCP(object):
             return self.compute.instances().insert(
                 project=self.gcp.get('project'),
                 zone=self.gcp.get('zone'),
-                body=self.define_config()).execute()
+                body=self.define_instance_config()).execute()
         except googleapiclient.errors.HttpError as e:
             if 'already exists' in str(e):
-                logger.error('instance already exists, returning with exit(1)')
+                logger.error('instance with name {} already exists. exit(1)'.format(self.project_name))
                 sys.exit(1)
             else:
                 logger.error(e)
@@ -215,7 +220,7 @@ class GCP(object):
         bucket = self.storage.get_bucket(self.gcp.get('bucket'))
         try:
             bucket.delete(force=True)
-        except Exception as e:
+        except Exception as ignore:
             # todo: make less generic (google.api_core.exceptions.NotFound)
             logger.info('bucket does not exist, skipping deletion')
 
@@ -251,5 +256,5 @@ class GCP(object):
         """Run the uploaded package"""
         create_instance_op = self.create_instance()
         self.wait_for_operation(create_instance_op)
-        logger.info('Successfully deployed package and created resources')
+        logger.info('Successfully created instance and started application')
 

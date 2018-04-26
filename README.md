@@ -51,20 +51,6 @@ This file should contain the following:
 }
 ```
 
-#### Google Cloud
-| parameter | required | default | description |
-| -- | -- | -- | -- |
-| ProjectId | yes | None | Project id within Google Cloud |
-| Region  | no  | europe-west4 | Region where the instance will run |
-| Zone | no  | europe-west4-b | Zone where the instance will run |
-| AuthKeyPath | yes | None | Path to the JSON or P12 auth file |
-| Bucket | yes | None | Unique bucket name for Google Storage |
-| Network | no  | default | Network where the instance will run |
-| SubNetwork | no  | default | Subnetwork where the instance will run |
-| InstanceType | no  | n1-standard-1 | Machine type |
-| Preemptible | no  | false | wheter the app runs on cheaper temporary instances |
-| DiskSizeGb | no  | 100 | Size (in GB) of the created disk |
-
 ### Deploying
 
 Deploying your job to AWS is now as simple as running:
@@ -115,6 +101,54 @@ Bokchoi now also supports running python applications on Amazon EMR. To run your
   }
 }
 ```
+
+### Google Compute Engine
+
+Google Compute Engine is also supported as a backend for python applications.
+Simply change the EMR/EC2 part to the following:
+
+The Google auth key can be obtained by creating a service account, which can be created by
+following this guide: https://cloud.google.com/iam/docs/creating-managing-service-account-keys
+
+```
+    {
+      "bokchoi-gcp": {
+        "EntryPoint": "deep_nn.main",
+        "Platform": "GCP",
+        "Requirements": [
+          "numpy==1.13.0",
+          "boto3==1.4.4"
+        ],
+        "GCP": {
+          "ProjectId": "google-project-id",
+          "AuthKeyLocation": "auth-key-user.json",
+          "Region": "europe-west4",
+          "Zone": "europe-west4-b",
+          "Bucket": "bokchoi-gcp",
+          "Network": "default",
+          "SubNetwork": "default",
+          "InstanceType": "n1-standard-1",
+          "Preemptible": true,
+          "DiskSizeGb": 100
+        }
+      }
+    }
+```
+
+| parameter | required | default | description |
+| -- | -- | -- | -- |
+| ProjectId | yes | None | Project id within Google Cloud |
+| AuthKeyPath | yes | None | Path to the JSON or P12 auth file |
+| Bucket | yes | None | Unique bucket name for Google Storage |
+| Region  | no  | europe-west4 | Region where the instance will run |
+| Zone | no  | europe-west4-b | Zone where the instance will run |
+| Network | no  | default | Network where the instance will run |
+| SubNetwork | no  | default | Subnetwork where the instance will run |
+| InstanceType | no  | n1-standard-1 | Machine type |
+| Preemptible | no  | false | wheter the app runs on cheaper temporary instances |
+| DiskSizeGb | no  | 100 | Size (in GB) of the created disk |
+
+
 
 ## Acknowledgements
 
