@@ -51,6 +51,20 @@ This file should contain the following:
 }
 ```
 
+#### Google Cloud
+| parameter | required | default | description |
+| -- | -- | -- | -- |
+| ProjectId | yes | None | Project id within Google Cloud |
+| Region  | no  | europe-west4 | Region where the instance will run |
+| Zone | no  | europe-west4-b | Zone where the instance will run |
+| AuthKeyPath | yes | None | Path to the JSON or P12 auth file |
+| Bucket | yes | None | Unique bucket name for Google Storage |
+| Network | no  | default | Network where the instance will run |
+| SubNetwork | no  | default | Subnetwork where the instance will run |
+| InstanceType | no  | n1-standard-1 | Machine type |
+| Preemptible | no  | false | wheter the app runs on cheaper temporary instances |
+| DiskSizeGb | no  | 100 | Size (in GB) of the created disk |
+
 ### Deploying
 
 Deploying your job to AWS is now as simple as running:
