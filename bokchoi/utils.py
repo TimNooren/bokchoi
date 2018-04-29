@@ -7,28 +7,6 @@ import os
 import zipfile
 
 
-class Response:
-
-    def __init__(self, success, message):
-        self._success = success
-        self._message = message
-
-    @property
-    def success(self):
-        return self._success
-
-    @property
-    def message(self):
-        return self._message
-
-    @property
-    def color(self):
-        if self._success:
-            return 'green'
-        else:
-            return 'red'
-
-
 def retry(func, exc, **kwargs):
     """ Retries boto3 function call in case a ClientError occurs
     :param func:                    Function to call
