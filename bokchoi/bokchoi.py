@@ -1,52 +1,72 @@
 
 from bokchoi.config import Config
 from bokchoi.aws import EMR, EC2
-from bokchoi.utils import Response
+
+
+def requires_config(fn):
+    """
+    Decorator; adds check whether config was loaded successfully.
+    :param fn:                      Function to add check to
+    :return:                        Decorated function
+    """
+    def fn_check_for_config(self, *args, **kwargs):
+        if not self.config.loaded:
+            return fn.__name__ + ' requires config. Run \'bokchoi init NAME\' to initialise.'
+        return fn(self, *args, **kwargs)
+    return fn_check_for_config
 
 
 class Bokchoi:
 
     backends = {'EC2': EC2, 'EMR': EMR}
 
-    def __init__(self, name, path):
+    def __init__(self, path):
 
-        self.config = Config(name, path)
+        self.config = Config(path)
 
-        if self.config.loaded:
-            self._backend = self._init_backend(self.config.platform)
+        try:
+            self.config.load()
+        except FileNotFoundError:
+            print('Config not found')
+        else:
+            self.backend = self.backends[self.config['Platform']](self.config.name, self.config)
 
-    def _init_backend(self, platform):
-        return self.backends[platform](self.config.name, self.config)
-
-    def init(self, platform):
+    def init(self, name, platform):
         """ Initialise new project
+        :param name:                Name of the project
         :param platform:            Platform used to run application
         :return:                    Response object
         """
+
         if self.config.loaded:
-            return Response(False, 'Project already initialised')
+            return 'Project already initialised. Deploy using \'bokchoi deploy\'.'
+        self.config.init(name, platform, self.backends[platform].default_config)
 
-        self._backend = self._init_backend(platform)
+        return 'Project initialised. Deploy using \'bokchoi deploy\'.'
 
-        self.config.write(self._backend.default_config)
-
-        return Response(True, 'Project initialised')
-
+    @requires_config
     def deploy(self, *args, **kwargs):
-        print('Deploying ' + self.config.name)
-        self._backend.deploy(path=self.config.path, *args, **kwargs)
+        print('Deploying: ' + self.config.name)
+        return self.backend.deploy(path=self.config.path, *args, **kwargs)
 
+    @requires_config
     def undeploy(self, dryrun):
-        self._backend.undeploy(dryrun)
+        print('Undeploying: ' + self.config.name)
+        return self.backend.undeploy(dryrun)
 
+    @requires_config
     def run(self):
-        self._backend.run()
+        print('Running: ' + self.config.name)
+        return self.backend.run()
 
+    @requires_config
     def stop(self, *args, **kwargs):
-        self._backend.stop(*args, **kwargs)
+        return self.backend.stop(*args, **kwargs)
 
+    @requires_config
     def connect(self, dryrun, *args, **kwargs):
-        self._backend.connect(dryrun, *args, **kwargs)
+        self.backend.connect(dryrun, *args, **kwargs)
 
+    @requires_config
     def status(self):
-        self._backend.status()
+        return self.backend.status()
