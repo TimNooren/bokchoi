@@ -1,8 +1,14 @@
 #!/bin/bash
 
-sudo apt-get update
-sudo apt-get -y upgrade
-sudo apt-get install -y python-pip python-dev unzip
+if [ "$(whoami)" != "root" ]
+then
+    sudo su
+fi
+
+apt-get update \
+    && apt-get -y upgrade \
+    && apt-get install -y python3-pip python3-dev unzip \
+    && pip3 install --upgrade pip
 
 BUCKET_NAME=$(curl http://metadata/computeMetadata/v1/instance/attributes/bucket_name -H "Metadata-Flavor: Google")
 PACKAGE_NAME=$(curl http://metadata/computeMetadata/v1/instance/attributes/package_name -H "Metadata-Flavor: Google")
@@ -11,5 +17,5 @@ ENTRYPOINT=$(curl http://metadata/computeMetadata/v1/instance/attributes/entry_p
 gsutil cp gs://${BUCKET_NAME}/${PACKAGE_NAME} .
 unzip ${PACKAGE_NAME}
 
-sudo pip install -r requirements.txt
-python ${ENTRYPOINT}
+pip3.4 install -r requirements.txt
+python3.4 ${ENTRYPOINT}

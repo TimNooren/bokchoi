@@ -11,6 +11,8 @@ import bokchoi.utils
 import googleapiclient.discovery
 import googleapiclient.errors
 
+import google.auth
+from google.oauth2 import service_account
 from google.cloud import storage, exceptions
 
 
@@ -18,27 +20,37 @@ class GCP(object):
     """Run Bokchoi on the Google Cloud using Google Compute Engines"""
     def __init__(self, bokchoi_project_name, settings):
         self.project_name = bokchoi_project_name
-        self.entry_point = settings.get('EntryPoint')
-        self.requirements = settings.get('Requirements')
+        self.entry_point = settings['EntryPoint']
+        self.requirements = settings['Requirements']
         self.gcp = self.retrieve_gcp_settings(settings)
+        self.credentials = self.authorize_client()
         self.compute = self.get_authorized_compute()
         self.storage = self.get_authorized_storage()
 
-    @staticmethod
-    def get_authorized_compute():
-        """Authorize with default method (implicit env variable) or otherwise
-        use the explicit authentication.
-        """
-        # todo: explicit step
-        return googleapiclient.discovery.build('compute', 'v1')
+    def authorize_client(self):
+        """If the environment variable GOOGLE_APPLICATION_CREDENTIALS or If the Google Cloud SDK is
+        installed and has application default credentials set they are loaded and returned."""
+        try:
+            credentials, _ = google.auth.default()
+            return credentials
+        except exceptions.Unauthorized as e:
+            credentials = service_account.Credentials.from_service_account_file(self.gcp.get('AuthKeyLocation'))
+            return credentials
+        except Exception as e:
+            print('Authentication failed, please set the GOOGLE_APPLICATION_CREDENTIALS env variable, install the'
+                  'Google SDK and authenticate, or supply the JSON file location. \n', e)
 
-    @staticmethod
-    def get_authorized_storage():
+    def get_authorized_compute(self):
         """Authorize with default method (implicit env variable) or otherwise
         use the explicit authentication.
         """
-        # todo: add explicit step
-        return storage.Client()
+        return googleapiclient.discovery.build('compute', 'v1', credentials=self.credentials)
+
+    def get_authorized_storage(self):
+        """Authorize with default method (implicit env variable) or otherwise
+        use the explicit authentication.
+        """
+        return storage.Client(credentials=self.credentials)
 
     @staticmethod
     def retrieve_gcp_settings(settings):
@@ -48,7 +60,7 @@ class GCP(object):
         :arg settings: a json file with with defined settings
         :return: a python dict with renamed input parameters + defaults
         """
-        gcp = settings.get('GCP')
+        gcp = settings['GCP']
 
         def check_none(v):
             if not gcp.get(v):
@@ -225,26 +237,26 @@ class GCP(object):
         blob.upload_from_file(file_object)
         return blob.public_url
 
-    def deploy(self):
+    def deploy(self, path=''):
         """Deploy package to GCP/Google Storage"""
         print('Uploading package to Google Storage bucket')
         self.create_bucket()
         cwd = os.getcwd()
         package, fingerprint = bokchoi.utils.zip_package(cwd, self.requirements)
         self.upload_blob('{}-{}.zip'.format(self.project_name, 'package'), package)
+        return 'Deployed!'
 
-    def undeploy(self):
+    def undeploy(self, dryrun=False):
         """Undeploy and delete all create d resources"""
         print('Deleting resources which are created on GCP')
         self.delete_bucket()
 
         delete_instance_op = self.delete_instance()
         self.wait_for_operation(delete_instance_op)
-        print('Successfully deleted resources')
+        return 'Undeployed!'
 
     def run(self):
         """Run the uploaded package"""
         create_instance_op = self.create_instance()
         self.wait_for_operation(create_instance_op)
-        print('Successfully created instance and started application')
-
+        return 'Running application'
