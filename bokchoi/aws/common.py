@@ -101,12 +101,9 @@ def get_security_groups(project_id, *group_names):
     if group_names:
         filters.append({'Name': 'group-name', 'Values': [*group_names]})
 
-    response = ec2_client.describe_security_groups(
-        Filters=filters
-    )
+    response = ec2_client.describe_security_groups(Filters=filters)
 
-    for group in response['SecurityGroups']:
-        yield ec2_resource.SecurityGroup(group['GroupId'])
+    return [ec2_resource.SecurityGroup(group['GroupId']) for group in response['SecurityGroups']]
 
 
 def delete_security_group(group, dryrun=True):
@@ -247,8 +244,7 @@ def get_instances(project_id):
     """
     filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(project_id)]},
                {'Name': 'instance-state-name', 'Values': ['pending', 'running', 'stopping', 'stopped']}]
-    for instance in ec2_resource.instances.filter(Filters=filters):
-        yield instance
+    return list(ec2_resource.instances.filter(Filters=filters))
 
 
 def terminate_instance(instance, dryrun=True):
@@ -374,11 +370,14 @@ def delete_role(role, dryrun):
 
 
 def get_policies(project_id, pattern=None):
-    """ Yields all IAM policies associated with deployment
+    """ Returns all IAM policies associated with deployment
     :param project_id:              Global project id
     :param pattern:                 Pattern to return specific policies (e.g. default-policy)
     :return:                        Boto3 policy resource
     """
+
+    policies = []
+
     for policy in iam_resource.policies.filter(Scope='Local'):
 
         policy_name = policy.policy_name
@@ -389,7 +388,9 @@ def get_policies(project_id, pattern=None):
         if pattern and pattern not in policy_name:
             continue
 
-        yield policy
+        policies.append(policy)
+
+    return policies
 
 
 def delete_policy(policy, dryrun):

@@ -5,77 +5,50 @@ import os
 
 class Config:
 
-    def __init__(self, name, path=''):
+    def __init__(self, path='.'):
 
-        self.path = path
+        self.name = None
         self.config_path = os.path.join(path, 'bokchoi_settings.json')
 
-        try:
-            with open(self.config_path, 'r') as config_file:
-                config_json = json.load(config_file)
-        except FileNotFoundError:
-            if name:
-                self._map = {}
-            else:
-                raise KeyError('No config found and no name specified')
-        else:
-            if not name and len(config_json.keys()) == 1:
-                name = list(config_json.keys())[0]
-            else:
-                raise KeyError('No name specified and multiple names found in config')
+        self.map = {}
 
-            self._map = config_json[name]
-        self.name = name
+        self.loaded = False
 
-        self.platform = self._map.get('Platform')
-        setattr(self, self.platform.lower(), self._map[self.platform])
+    def load(self):
 
-        self.loaded = bool(self._map)
+        with open(self.config_path, 'r') as config_file:
+            config_json = json.load(config_file)
 
-    def write(self, _map=None):
+        self.name = list(config_json.keys())[0]
+
+        self.map = config_json[self.name]
+        self.validate(self.map)
+
+        self.loaded = True
+
+    def init(self, name, platform, platform_specific=None):
+
+        default_config = {
+            'Platform': platform
+            , 'Shutdown': False
+            , 'Notebook': True
+            , 'App': ''
+            , 'Requirements': []
+            , platform: platform_specific
+        }
+
+        self.map = {name: default_config}
+
         with open(self.config_path, 'w') as _file:
-            json.dump({self.name: _map or self._map}, _file, indent=4)
+            json.dump(self.map, _file, indent=4)
 
-    @property
-    def platform(self):
-        return self._map.get('Platform')
+    def validate(self, config):
+        non_optional = {'App', 'Platform'}
 
-    @property
-    def platform(self):
-        return self._map.get('Platform')
+        missing_keys = non_optional - set(config)
 
-    @platform.setter
-    def platform(self, platform):
-        self._map['Platform'] = platform
+        if missing_keys:
+            raise AssertionError('Missing keys in config: {}'.format(', '.join(missing_keys)))
 
-    @property
-    def app(self):
-        return self._map.get('App', '.')
-
-    @app.setter
-    def app(self, app):
-        self._map['App'] = app
-
-    @property
-    def connect(self):
-        return self._map.get('Connect')
-
-    @connect.setter
-    def connect(self, flag):
-        self._map['Connect'] = flag
-
-    @property
-    def requirements(self):
-        return self._map.get('Requirements')
-
-    @requirements.setter
-    def requirements(self, flag):
-        self._map['Requirements'] = flag
-
-    @property
-    def shutdown(self):
-        return self._map.get('Shutdown', True)
-
-    @shutdown.setter
-    def shutdown(self, flag):
-        self._map['Shutdown'] = flag
+    def __getitem__(self, item):
+        return self.map[item]

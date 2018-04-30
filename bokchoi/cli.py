@@ -13,65 +13,54 @@ def cli():
     pass
 
 
-def get_bokchoi(func):
-    """ Decorator that instantiates the Bokchoi backend using the project_name
-    and (optional) config parameters and passes it as the first argument.
-    :param func:                Function
-    :return:                    Decorated function
-    """
-    @click.option('--name', '-n', required=False)
-    @click.option('--path', '-p', default='', help="Application path")
-    def wrapped(name, path, *args, **kwargs):
-        func(Bokchoi(name, path), *args, **kwargs)
-    return wrapped
-
-
 @cli.command('init', help='Initialise new project')
+@click.argument('name')
+@click.option('--directory', '-d', default='.', help="Application directory")
 @click.option('--platform', '-f', default='EC2')
-@get_bokchoi
-def init(bokchoi, platform):
-    res = bokchoi.init(platform)
-    click.secho(res.message, fg=res.color)
+def init(name, directory, platform):
+    response = Bokchoi(directory).init(name, platform)
+    click.secho(response, fg='green')
 
 
 @cli.command('deploy', help='Deploy your project')
-@get_bokchoi
-def deploy(bokchoi):
-    bokchoi.deploy()
-    click.secho('Deployed', fg='green')
+@click.option('--directory', '-d', default='.', help="Application directory")
+def deploy(directory):
+    response = Bokchoi(directory).deploy()
+    click.secho(response, fg='green')
 
 
 @cli.command('undeploy', help='Remove your project deployment')
+@click.option('--directory', '-d', default='.', help="Application directory")
 @click.option('--dryrun', is_flag=True, default=False, help="Only prints actions")
-@get_bokchoi
-def undeploy(bokchoi, dryrun):
-    bokchoi.undeploy(dryrun)
-    click.secho('Undeployed', fg='green')
+def undeploy(directory, dryrun):
+    response = Bokchoi(directory).undeploy(dryrun)
+    click.secho(response, fg='green')
 
 
 @cli.command('run', help='Run your application')
-@get_bokchoi
-def run(bokchoi):
-    bokchoi.run()
-    click.secho('Running application', fg='green')
+@click.option('--directory', '-d', default='.', help="Application directory")
+def run(directory):
+    response = Bokchoi(directory).run()
+    click.secho(response, fg='green')
 
 
 @cli.command('stop', help='Stop any running applications')
+@click.option('--directory', '-d', default='.', help="Application directory")
 @click.option('--dryrun', is_flag=True, default=False, help="Print in stead of terminate")
-@get_bokchoi
-def stop(bokchoi, dryrun):
-    bokchoi.stop(dryrun)
+def stop(directory, dryrun):
+    response = Bokchoi(directory).stop(dryrun)
+    click.secho(response, fg='green')
 
 
 @cli.command('connect', help='Connect to your running application')
+@click.option('--directory', '-d', default='.', help="Application directory")
 @click.option('--local-port', help='Local port to bind to')
 @click.option('--remote-port', help='Remote port to bind to')
-@get_bokchoi
-def connect(bokchoi, local_port, remote_port):
-    bokchoi.connect(local_port, remote_port)
+def connect(directory, local_port, remote_port):
+    Bokchoi(directory).connect(local_port, remote_port)
 
 
-@cli.command('status', help='Connect to your running application')
-@get_bokchoi
-def status(bokchoi):
-    bokchoi.status()
+@cli.command('status', help='Status of deployed project')
+@click.option('--directory', '-d', default='.', help="Application directory")
+def status(directory):
+    Bokchoi(directory).status()

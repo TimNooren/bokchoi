@@ -80,45 +80,46 @@ DEFAULT_POLICY = """{{
 
 class EC2:
     """Create EC2 object which can be used to schedule jobs"""
+
+    default_config = {
+        'Region': '',
+        'SpotPrice': '0.10',
+        'LaunchSpecification': {
+            'ImageId': '',
+            'InstanceType': 'c5.xlarge',
+            'SubnetId': ''
+            }
+        }
+
     def __init__(self, project_name, config):
 
-        self._name = project_name
+        self.validate(config['EC2'])
+
         self.config = config
 
-        self.launch_spec = config.ec2['LaunchSpecification']
+        self.launch_spec = config['EC2']['LaunchSpecification']
         self.subnet = common.get_subnet(self.launch_spec['SubnetId'])
 
         self.project_id = utils.create_project_id(project_name, common.get_aws_account_id())
         self.package_name = 'bokchoi-' + project_name + '.zip'
 
-        if self.config.connect:
-            self.ssh = SSH(self.project_id)
+    def validate(self, config):
 
-    @property
-    def default_config(self):
-        return {'Platform': 'EC2',
-                'Notebook': True,
-                'Entrypoint': '',
-                'EC2': {
-                    'Region': '',
-                    'SpotPrice': '',
-                    'LaunchSpecification': {
-                      'ImageId': '',
-                      'InstanceType': '',
-                      'SubnetId': ''
-                    }
-                  }
-                }
+        non_optional = {'SpotPrice', 'Region', 'LaunchSpecification'}
+        missing_keys = non_optional - set(config)
 
-    def deploy(self, path=''):
+        if missing_keys:
+            raise AssertionError('Missing keys in EC2 config: {}'.format(', '.join(missing_keys)))
+
+    def deploy(self, path):
         """Zip package and deploy to S3"""
 
-        bucket_name = common.create_bucket(self.config.ec2['Region'], self.project_id)
+        bucket_name = common.create_bucket(self.config['EC2']['Region'], self.project_id)
 
-        package, fingerprint = utils.zip_package(path or os.getcwd(), self.config.requirements)
+        package, fingerprint = utils.zip_package(path, self.config['Requirements'])
         common.upload_to_s3(bucket_name, package, self.package_name, fingerprint)
 
-        policies = self.create_policies(self.config.ec2.get('CustomPolicy'))
+        policies = self.create_policies(self.config['EC2'].get('CustomPolicy'))
 
         self.create_default_role_and_profile(policies)
 
@@ -130,6 +131,7 @@ class EC2:
                                         , 'ToPort': 22
                                         , 'IpProtocol': 'tcp'}
                                      )
+        return 'Deployed!'
 
     def undeploy(self, dryrun):
         """Deletes all policies, users, and instances permanently"""
@@ -153,33 +155,33 @@ class EC2:
         for group in common.get_security_groups(self.project_id):
             common.delete_security_group(group, dryrun)
 
+        return 'Undeployed!'
+
     def run(self):
         """Create EC2 machine with given AMI and instance settings"""
 
-        if self.config.connect:
-            public_key = self.ssh.public_key
-        else:
-            public_key = ''
+        public_key = SSH(self.project_id).public_key if self.config['Notebook'] else ''
 
-        if self.config.connect:
-            security_group = next(common.get_security_groups(self.project_id, self.project_id))
+        if self.config['Notebook']:
+            security_group = common.get_security_groups(self.project_id, self.project_id)[0]
             if self.launch_spec.get('SecurityGroupIds'):
                 self.launch_spec['SecurityGroupIds'] += [security_group.group_id]
             else:
                 self.launch_spec['SecurityGroupIds'] = [security_group.group_id]
-        print(public_key)
+
         user_data = USER_DATA.format(bucket=self.project_id
                                      , package=self.package_name
-                                     , app=self.config.app
-                                     , public=public_key
-                                     , shutdown=self.config.shutdown
-                                     , notebook=self.config.connect
+                                     , app=self.config['App']
+                                     , shutdown=self.config['Shutdown']
+                                     , notebook=self.config['Notebook']
                                      , public_key=public_key)
 
         self.launch_spec['UserData'] = b64encode(user_data.encode('ascii')).decode('ascii')
         self.launch_spec['IamInstanceProfile'] = {'Name': self.project_id}
 
-        common.request_spot_instances(self.project_id, self.launch_spec, self.config.ec2['SpotPrice'])
+        common.request_spot_instances(self.project_id, self.launch_spec, self.config['EC2']['SpotPrice'])
+
+        return 'Running application'
 
     def create_default_role_and_profile(self, policies):
         """ Creates default role and instance profile for EC2 deployment.
@@ -198,22 +200,22 @@ class EC2:
         default_policy_document = DEFAULT_POLICY.format(bucket=self.project_id)
         common.create_policy(default_policy_name, default_policy_document)
 
-        policies.append(next(common.get_policies(default_policy_name)))
+        policies.append(common.get_policies(default_policy_name)[0])
 
         if custom_policy:
             print('Creating custom policy')
 
             custom_policy_name = self.project_id + '-custom-policy'
             common.create_policy(custom_policy_name, custom_policy)
-            policies.append(next(common.get_policies(custom_policy_name)))
+            policies.append(common.get_policies(custom_policy_name)[0])
 
         return policies
 
     def connect(self, local_port, remote_port):
         """Set up port forwarding to remote server"""
-        instance = next(common.get_instances(self.project_id))
+        instance = common.get_instances(self.project_id)[0]
         instance_ip = instance.public_ip_address or instance.private_ip_address
-        self.ssh.forward(local_port or 8888, instance_ip, remote_port or 8888, 'ubuntu')
+        SSH(self.project_id).forward(local_port or 8888, instance_ip, remote_port or 8888, 'ubuntu')
 
     def stop(self, dryrun=False):
         """Stop all running instances"""
@@ -222,9 +224,10 @@ class EC2:
         for instance in common.get_instances(self.project_id):
             common.terminate_instance(instance, dryrun)
 
+        return 'Application stopped'
+
     def status(self):
         """Status of current deployment"""
         print('\nStatus:')
         for instance in common.get_instances(self.project_id):
             print('\t' + instance.instance_id + ' : ' + instance.state['Name'])
-        print()
