@@ -11,7 +11,7 @@ import bokchoi.utils
 import googleapiclient.discovery
 import googleapiclient.errors
 
-import google.auth
+from google.auth import exceptions as auth_except, default
 from google.oauth2 import service_account
 from google.cloud import storage, exceptions
 
@@ -31,10 +31,10 @@ class GCP(object):
         """If the environment variable GOOGLE_APPLICATION_CREDENTIALS or If the Google Cloud SDK is
         installed and has application default credentials set they are loaded and returned."""
         try:
-            credentials, _ = google.auth.default()
+            credentials, _ = default()
             return credentials
-        except exceptions.Unauthorized as e:
-            credentials = service_account.Credentials.from_service_account_file(self.gcp.get('AuthKeyLocation'))
+        except auth_except.DefaultCredentialsError as e:
+            credentials = service_account.Credentials.from_service_account_file(self.gcp.get('auth_key'))
             return credentials
         except Exception as e:
             print('Authentication failed, please set the GOOGLE_APPLICATION_CREDENTIALS env variable, install the'
@@ -84,11 +84,10 @@ class GCP(object):
 
     def list_instances(self):
         """List names of all existing instances"""
-        instances = []
         result = self.compute.instances().list(
             project=self.gcp.get('project'),
             zone=self.gcp.get('zone')).execute()
-        [instances.append(x['name']) for x in result['items']]
+        instances = [x['name'] for x in result['items']]
         return instances
 
     def define_instance_config(self):
@@ -102,8 +101,9 @@ class GCP(object):
         machine_type = "zones/{}/machineTypes/{}".format(
             self.gcp.get('zone'), self.gcp.get('instance_type'))
 
-        startup_script = open(
-            os.path.join(os.path.dirname(__file__), '../scripts/gcp-startup-script.sh'), 'r').read()
+        gcp_script = os.path.join(os.path.dirname(__file__), '../scripts/gcp-startup-script.sh')
+        with open(gcp_script, 'r') as script:
+            startup_script = script.read()
 
         config = {
             'name': self.project_name,
@@ -136,7 +136,8 @@ class GCP(object):
                 'email': 'default',
                 'scopes': [
                     'https://www.googleapis.com/auth/devstorage.read_write',
-                    'https://www.googleapis.com/auth/logging.write'
+                    'https://www.googleapis.com/auth/logging.write',
+                    'https://www.googleapis.com/auth/compute'
                 ]
             }],
 
@@ -153,6 +154,12 @@ class GCP(object):
                 }, {
                     'key': 'entry_point',
                     'value': self.entry_point
+                }, {
+                    'key': 'instance_name',
+                    'value': self.project_name
+                }, {
+                    'key': 'zone',
+                    'value': self.gcp.get('zone')
                 }]
             }
         }
@@ -247,7 +254,7 @@ class GCP(object):
         return 'Deployed!'
 
     def undeploy(self, dryrun=False):
-        """Undeploy and delete all create d resources"""
+        """Undeploy and delete all created resources"""
         print('Deleting resources which are created on GCP')
         self.delete_bucket()
 
