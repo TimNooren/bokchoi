@@ -79,7 +79,7 @@ class GCP(object):
             'sub_network': gcp.get('SubNetwork', 'default'),
             'instance_type': gcp.get('InstanceType', 'n1-standard-1'),
             'preemptible': gcp.get('Preemptible', False),
-            'disk_space': gcp.get('DiskSpaceGb', 50)
+            'disk_space': gcp.get('DiskSpaceGb', 25)
         }
 
     def list_instances(self):

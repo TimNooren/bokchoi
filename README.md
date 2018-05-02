@@ -129,7 +129,7 @@ following this guide: https://cloud.google.com/iam/docs/creating-managing-servic
           "SubNetwork": "default",
           "InstanceType": "n1-standard-1",
           "Preemptible": true,
-          "DiskSizeGb": 100
+          "DiskSizeGb": 25
         }
       }
     }
