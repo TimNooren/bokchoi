@@ -227,10 +227,10 @@ class GCP(object):
     def delete_bucket(self):
         """Delete the created bucket"""
         print('Deleting bucket')
-        bucket = self.storage.get_bucket(self.gcp.get('bucket'))
         try:
+            bucket = self.storage.get_bucket(self.gcp.get('bucket'))
             bucket.delete(force=True)
-        except Exception as ignore:
+        except exceptions.NotFound as e:
             print('bucket does not exist, skipping deletion')
 
     def upload_blob(self, file_name, file_object):
@@ -257,9 +257,6 @@ class GCP(object):
         """Undeploy and delete all created resources"""
         print('Deleting resources which are created on GCP')
         self.delete_bucket()
-
-        delete_instance_op = self.delete_instance()
-        self.wait_for_operation(delete_instance_op)
         return 'Undeployed!'
 
     def run(self):
