@@ -21,7 +21,7 @@ class GCP(object):
     def __init__(self, bokchoi_project_name, settings):
         self.project_name = bokchoi_project_name
         self.entry_point = settings['EntryPoint']
-        self.requirements = settings['Requirements']
+        self.requirements = settings.get('Requirements', [])
         self.gcp = self.retrieve_gcp_settings(settings)
         self.credentials = self.authorize_client()
         self.compute = self.get_authorized_compute()
@@ -244,12 +244,11 @@ class GCP(object):
         blob.upload_from_file(file_object)
         return blob.public_url
 
-    def deploy(self, path=''):
+    def deploy(self, path):
         """Deploy package to GCP/Google Storage"""
         print('Uploading package to Google Storage bucket')
         self.create_bucket()
-        cwd = os.getcwd()
-        package, fingerprint = bokchoi.utils.zip_package(cwd, self.requirements)
+        package, fingerprint = bokchoi.utils.zip_package(path, self.requirements)
         self.upload_blob('{}-{}.zip'.format(self.project_name, 'package'), package)
         return 'Deployed!'
 
