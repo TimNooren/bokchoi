@@ -8,6 +8,8 @@ class Config:
     def __init__(self, path='.'):
 
         self.name = None
+
+        self.path = path
         self.config_path = os.path.join(path, 'bokchoi_settings.json')
 
         self.map = {}
@@ -30,9 +32,9 @@ class Config:
 
         default_config = {
             'Platform': platform
-            , 'Shutdown': False
-            , 'Notebook': True
-            , 'App': ''
+            , 'Shutdown': True
+            , 'Notebook': False
+            , 'EntryPoint': ''
             , 'Requirements': []
             , platform: platform_specific
         }
@@ -43,7 +45,7 @@ class Config:
             json.dump(self.map, _file, indent=4)
 
     def validate(self, config):
-        non_optional = {'App', 'Platform'}
+        non_optional = {'EntryPoint', 'Platform'}
 
         missing_keys = non_optional - set(config)
 
@@ -52,3 +54,6 @@ class Config:
 
     def __getitem__(self, item):
         return self.map[item]
+
+    def get(self, item, default=None):
+        return self.map.get(item, default)
