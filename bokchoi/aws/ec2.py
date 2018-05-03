@@ -39,7 +39,7 @@ then
 else
     # Run app
     cd /tmp
-    python3 {app}
+    python3 {entrypoint}
     aws s3 cp /var/log/cloud-init-output.log s3://{bucket}/cloud-init-output.log
     if [ "{shutdown}" = "True" ]
     then
@@ -116,7 +116,7 @@ class EC2:
 
         bucket_name = common.create_bucket(self.config['EC2']['Region'], self.project_id)
 
-        package, fingerprint = utils.zip_package(path, self.config['Requirements'])
+        package, fingerprint = utils.zip_package(path, self.config.get('Requirements', []))
         common.upload_to_s3(bucket_name, package, self.package_name, fingerprint)
 
         policies = self.create_policies(self.config['EC2'].get('CustomPolicy'))
@@ -160,9 +160,9 @@ class EC2:
     def run(self):
         """Create EC2 machine with given AMI and instance settings"""
 
-        public_key = SSH(self.project_id).public_key if self.config['Notebook'] else ''
+        public_key = SSH(self.project_id).public_key if self.config.get('Notebook') else ''
 
-        if self.config['Notebook']:
+        if self.config.get('Notebook'):
             security_group = common.get_security_groups(self.project_id, self.project_id)[0]
             if self.launch_spec.get('SecurityGroupIds'):
                 self.launch_spec['SecurityGroupIds'] += [security_group.group_id]
@@ -171,9 +171,9 @@ class EC2:
 
         user_data = USER_DATA.format(bucket=self.project_id
                                      , package=self.package_name
-                                     , app=self.config['App']
-                                     , shutdown=self.config['Shutdown']
-                                     , notebook=self.config['Notebook']
+                                     , entrypoint=self.config['EntryPoint']
+                                     , shutdown=self.config.get('Shutdown', True)
+                                     , notebook=self.config.get('Notebook', False)
                                      , public_key=public_key)
 
         self.launch_spec['UserData'] = b64encode(user_data.encode('ascii')).decode('ascii')
@@ -224,7 +224,7 @@ class EC2:
         for instance in common.get_instances(self.project_id):
             common.terminate_instance(instance, dryrun)
 
-        return 'Application stopped'
+        return 'Instances stopped'
 
     def status(self):
         """Status of current deployment"""
