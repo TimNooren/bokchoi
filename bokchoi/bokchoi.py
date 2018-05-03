@@ -1,6 +1,7 @@
 
 from bokchoi.config import Config
 from bokchoi.aws import EMR, EC2
+from bokchoi.gcp import GCP
 
 
 def requires_config(fn):
@@ -18,7 +19,7 @@ def requires_config(fn):
 
 class Bokchoi:
 
-    backends = {'EC2': EC2, 'EMR': EMR}
+    backends = {'EC2': EC2, 'EMR': EMR, 'GCP': GCP}
 
     def __init__(self, path):
 
@@ -45,9 +46,9 @@ class Bokchoi:
         return 'Project initialised. Deploy using \'bokchoi deploy\'.'
 
     @requires_config
-    def deploy(self, *args, **kwargs):
+    def deploy(self):
         print('Deploying: ' + self.config.name)
-        return self.backend.deploy(path=self.config.path, *args, **kwargs)
+        return self.backend.deploy(path=self.config.config_path)
 
     @requires_config
     def undeploy(self, dryrun):

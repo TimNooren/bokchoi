@@ -17,7 +17,10 @@ setup(
         'Click',
         'boto3',
         'botocore',
-        'paramiko'
+        'paramiko',
+        'google-api-python-client',
+        'google-auth-httplib2',
+        'google-cloud-storage'
     ],
     url='https://github.com/TimNooren/bokchoi',
     author='Tim Nooren',
