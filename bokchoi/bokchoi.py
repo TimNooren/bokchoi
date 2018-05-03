@@ -48,7 +48,7 @@ class Bokchoi:
     @requires_config
     def deploy(self):
         print('Deploying: ' + self.config.name)
-        return self.backend.deploy(path=self.config.config_path)
+        return self.backend.deploy(path=self.config.path)
 
     @requires_config
     def undeploy(self, dryrun):
