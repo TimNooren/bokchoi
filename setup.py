@@ -11,7 +11,7 @@ except ImportError:
 
 setup(
     name="bokchoi",
-    version="0.2.8",
+    version="0.3.0",
     packages=['bokchoi'],
     install_requires=[
         'Click',
