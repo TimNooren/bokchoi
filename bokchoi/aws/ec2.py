@@ -2,7 +2,7 @@
 """
 Class which can be used to deploy and run EC2 spot instances
 """
-import os
+
 from base64 import b64encode
 
 from bokchoi import utils
