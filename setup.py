@@ -11,13 +11,16 @@ except ImportError:
 
 setup(
     name="bokchoi",
-    version="0.2.8",
+    version="0.3.0",
     packages=['bokchoi'],
     install_requires=[
         'Click',
         'boto3',
         'botocore',
-        'paramiko'
+        'paramiko',
+        'google-api-python-client',
+        'google-auth-httplib2',
+        'google-cloud-storage'
     ],
     url='https://github.com/TimNooren/bokchoi',
     author='Tim Nooren',

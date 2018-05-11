@@ -6,10 +6,11 @@ Class which can be used to deploy and run EMR jobs
 import os
 import sys
 import time
+
 import boto3
 
-from bokchoi import common
-
+from bokchoi import utils
+from bokchoi.aws import common
 
 class EMR(object):
     """Create EMR object which can be used to schedule jobs"""
@@ -18,31 +19,18 @@ class EMR(object):
         self.project_name = project
 
         aws_account_id = common.get_aws_account_id()
-        self.project_id = common.create_project_id(project, aws_account_id)
+        self.project_id = utils.create_project_id(project, aws_account_id)
         self.job_flow_id = None
 
-    def schedule(self):
-        """Schedule task"""
-        if self.settings.get('Schedule'):
-
-            from bokchoi.scheduler import Scheduler
-
-            scheduler = Scheduler(self.project_id
-                                  , self.project_name
-                                  , self.settings.get('Schedule')
-                                  , self.settings.get('Requirements'))
-            scheduler.deploy()
-
-    def deploy(self):
+    def deploy(self, path=''):
         """Zip package and deploy to S3 so it can be used by EMR"""
         bucket_name = common.create_bucket(self.settings['Region'], self.project_id)
 
         cwd = os.getcwd()
-        package, fingerprint = common.zip_package(cwd, self.settings.get('Requirements'))
+        package, fingerprint = utils.zip_package(path or cwd, self.settings.get('Requirements'))
 
         package_name = 'bokchoi-' + self.project_name + '.zip'
         common.upload_to_s3(bucket_name, package, package_name, fingerprint)
-        self.schedule()
 
     def run(self):
         """Create Spark cluster and run specified job"""
@@ -68,14 +56,6 @@ class EMR(object):
 
         # remove s3 bucket
         common.delete_bucket(self.project_id, dryrun)
-
-        from bokchoi.scheduler import Scheduler
-
-        scheduler = Scheduler(self.project_id
-                              , self.project_name
-                              , self.settings.get('Schedule')
-                              , self.settings.get('Requirements'))
-        scheduler.undeploy(dryrun)
 
     def start_spark_cluster(self, emr_client):
         """
