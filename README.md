@@ -145,7 +145,7 @@ following this guide: https://cloud.google.com/iam/docs/creating-managing-servic
 | Network | no  | default | Network where the instance will run |
 | SubNetwork | no  | default | Subnetwork where the instance will run |
 | InstanceType | no  | n1-standard-1 | Machine type |
-| Preemptible | no  | false | wheter the app runs on cheaper temporary instances |
+| Preemptible | no  | false | Whether the app runs on cheaper temporary instances |
 | DiskSizeGb | no  | 100 | Size (in GB) of the created disk |
 
 
