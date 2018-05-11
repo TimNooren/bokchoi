@@ -27,7 +27,7 @@ def retry(func, exc, **kwargs):
 def create_project_id(project_name, vendor_specific_id):
     """Creates project id by hashing vendor specific id and project name"""
     unique_id = hashlib.sha1((vendor_specific_id + project_name).encode()).hexdigest()
-    return '-'.join(('bokchoi', project_name, unique_id))
+    return '-'.join(('bokchoi', project_name, unique_id[:12]))
 
 
 def get_my_ip():
