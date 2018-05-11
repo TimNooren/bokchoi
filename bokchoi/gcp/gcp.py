@@ -263,3 +263,12 @@ class GCP(object):
         create_instance_op = self.create_instance()
         self.wait_for_operation(create_instance_op)
         return 'Running application'
+
+    def stop(self, dryrun=False):
+        return 'Stop not yet implemented. Please stop VM manually'
+
+    def connect(self, dryrun, *args, **kwargs):
+        print('Connect not yet implemented')
+
+    def status(self):
+        print('Status not yet implemented')
