@@ -101,7 +101,7 @@ class GCP(object):
         machine_type = "zones/{}/machineTypes/{}".format(
             self.gcp.get('zone'), self.gcp.get('instance_type'))
 
-        gcp_script = os.path.join(os.path.dirname(__file__), '../scripts/gcp-startup-script.sh')
+        gcp_script = os.path.join(os.path.dirname(__file__), 'gcp-startup-script.sh')
         with open(gcp_script, 'r') as script:
             startup_script = script.read()
 
