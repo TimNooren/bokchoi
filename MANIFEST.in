@@ -1,2 +1,3 @@
 include README.md
 include LICENSE
+include bokchoi/gcp/gcp-startup-script.sh
