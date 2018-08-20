@@ -246,10 +246,9 @@ class GCP(object):
         return blob.public_url
 
     def download_blob(self, file_name):
-        """Upload file to Google Storage
+        """Download file from Google Storage
                 :arg file_name: target filename in Google storage
-                :arg file_object: zip file object which will be uploaded
-                :return: public url of the Google Storage resource
+                :return: fileobject as string
                 """
         bucket = self.storage.get_bucket(self.gcp.get('bucket'))
         blob = bucket.blob(file_name)
@@ -275,24 +274,25 @@ class GCP(object):
         create_instance_op = self.create_instance()
         self.wait_for_operation(create_instance_op)
         print('Running application')
-        if self.wait_for_execution:
-            sec = 0
-            while True:
-                if self.project_name in self.list_instances():
-                    time.sleep(10)
-                    sec += 10
-                    if sec % 300 == 0:
-                        print("minute {}: instance still running".format(sec / 60))
-                else:
-                    logs = self.download_blob('{}-{}.zip-logs.txt'.format(self.project_name, 'package'))
-                    print("""instance no longer running, logs are as follows:\n\n-------------------------------------
-                    --------------------------------------------""")
-                    for l in logs.split('\n'):
-                        print(l)
-                    print("---------------------------------------------------------------------------------")
-                    break
+        if not self.wait_for_execution:
+            return "Not awaiting execution, finishing now"
+        sec = 0
+        while True:
+            if self.project_name in self.list_instances():
+                time.sleep(10)
+                sec += 10
+                if sec % 300 == 0:
+                    print("minute {}: instance still running".format(sec / 60))
+            else:
+                logs = self.download_blob('{}-{}.zip-logs.txt'.format(self.project_name, 'package'))
+                print("""Instance no longer running, logs are as follows:\n\n-------------------------------------
+                --------------------------------------------""")
+                for l in logs.split('\n'):
+                    print(l)
+                print("---------------------------------------------------------------------------------")
+                break
 
-        return 'Done'
+        return 'Script has finished'
 
     def stop(self, dryrun=False):
         return 'Stop not yet implemented. Please stop VM manually'
