@@ -22,6 +22,7 @@ class GCP(object):
         self.project_name = bokchoi_project_name
         self.entry_point = settings['EntryPoint']
         self.requirements = settings.get('Requirements', [])
+        self.wait_for_execution = settings.get("WaitForExecution", False)
         self.gcp = self.retrieve_gcp_settings(settings)
         self.credentials = self.authorize_client()
         self.compute = self.get_authorized_compute()
@@ -96,7 +97,7 @@ class GCP(object):
         :return: Defined Compute Engine configuration
         """
         image_response = self.compute.images().getFromFamily(
-            project='debian-cloud', family='debian-8').execute()
+            project='debian-cloud', family='debian-9').execute()
 
         machine_type = "zones/{}/machineTypes/{}".format(
             self.gcp.get('zone'), self.gcp.get('instance_type'))
@@ -244,6 +245,16 @@ class GCP(object):
         blob.upload_from_file(file_object)
         return blob.public_url
 
+    def download_blob(self, file_name):
+        """Download file from Google Storage
+                :arg file_name: target filename in Google storage
+                :return: fileobject as string
+                """
+        bucket = self.storage.get_bucket(self.gcp.get('bucket'))
+        blob = bucket.blob(file_name)
+        filestring = blob.download_as_string().decode('utf-8')
+        return filestring
+
     def deploy(self, path):
         """Deploy package to GCP/Google Storage"""
         print('Uploading package to Google Storage bucket')
@@ -262,7 +273,26 @@ class GCP(object):
         """Run the uploaded package"""
         create_instance_op = self.create_instance()
         self.wait_for_operation(create_instance_op)
-        return 'Running application'
+        print('Running application')
+        if not self.wait_for_execution:
+            return "Not awaiting execution, finishing now"
+        sec = 0
+        while True:
+            if self.project_name in self.list_instances():
+                time.sleep(10)
+                sec += 10
+                if sec % 300 == 0:
+                    print("minute {}: instance still running".format(sec / 60))
+            else:
+                logs = self.download_blob('{}-{}.zip-logs.txt'.format(self.project_name, 'package'))
+                print("""Instance no longer running, logs are as follows:\n\n-------------------------------------
+                --------------------------------------------""")
+                for l in logs.split('\n'):
+                    print(l)
+                print("---------------------------------------------------------------------------------")
+                break
+
+        return 'Script has finished'
 
     def stop(self, dryrun=False):
         return 'Stop not yet implemented. Please stop VM manually'

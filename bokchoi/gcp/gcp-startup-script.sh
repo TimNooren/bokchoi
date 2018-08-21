@@ -19,7 +19,7 @@ ZONE=$(curl http://metadata/computeMetadata/v1/instance/attributes/zone -H "Meta
 gsutil cp gs://${BUCKET_NAME}/${PACKAGE_NAME} .
 unzip ${PACKAGE_NAME}
 
-pip3.4 install -r requirements.txt
-python3.4 ${ENTRYPOINT} >> logs.txt 2>&1
+pip3.5 install -r requirements.txt
+python3.5 ${ENTRYPOINT} >> logs.txt 2>&1
 gsutil cp logs.txt gs://${BUCKET_NAME}/${PACKAGE_NAME}-logs.txt
 gcloud compute instances delete ${INSTANCE_NAME} --zone ${ZONE}
