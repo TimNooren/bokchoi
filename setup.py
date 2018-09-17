@@ -11,7 +11,7 @@ except ImportError:
 
 setup(
     name="bokchoi",
-    version="0.3.4",
+    version="0.4.0",
     packages=['bokchoi', 'bokchoi.aws', 'bokchoi.gcp'],
     install_requires=[
         'Click',
