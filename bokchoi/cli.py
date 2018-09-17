@@ -64,3 +64,9 @@ def connect(directory, local_port, remote_port):
 @click.option('--directory', '-d', default='.', help="Application directory")
 def status(directory):
     Bokchoi(directory).status()
+
+
+@cli.command('logs', help='View logs of current or latest run')
+@click.option('--directory', '-d', default='.', help="Application directory")
+def logs(directory):
+    Bokchoi(directory).logs()

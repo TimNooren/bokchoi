@@ -71,3 +71,7 @@ class Bokchoi:
     @requires_config
     def status(self):
         return self.backend.status()
+
+    @requires_config
+    def logs(self):
+        return self.backend.logs()
