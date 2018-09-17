@@ -15,7 +15,7 @@ python3 -c "import zipfile; zf = zipfile.ZipFile('/tmp/{package}'); zf.extractal
 
 # Make cloudwatch logger executable and fix line endings
 sudo chmod u+x /tmp/cloudwatch_logger.py
-sed -i $'s/\\r$//' /tmp/cloudwatch_logger.py
+sed -i $'s/\\r$//' /tmp/cloudwatch_logger.py    # Convert Windows line endings to unix
 
 echo "Downloaded and unpacked project zip" | /tmp/cloudwatch_logger.py bokchoi
 
