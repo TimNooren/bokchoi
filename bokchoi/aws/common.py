@@ -13,11 +13,18 @@ iam_resource = session.resource('iam')
 s3_client = session.client('s3')
 s3_resource = session.resource('s3')
 
+logs_client = boto3.client('logs')
+
 
 def get_aws_account_id():
     """ Returns AWS account ID"""
     response = ec2_client.describe_security_groups(GroupNames=['Default'])
     return response['SecurityGroups'][0]['OwnerId']
+
+
+def get_default_region():
+    """Regions default region"""
+    return boto3.Session().region_name
 
 
 def create_bucket(region, bucket_name):
@@ -423,3 +430,85 @@ def delete_policy(policy, dryrun):
             raise e
 
     print('Successfully deleted Policy:', policy_name)
+
+
+def create_log_group(log_group_name):
+
+    try:
+        logs_client.create_log_group(
+            logGroupName=log_group_name
+        )
+        print('Created log group ' + log_group_name)
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceAlreadyExistsException':
+            print('Log group already exists ' + log_group_name)
+        else:
+            raise e
+
+
+def create_log_stream(log_group_name, log_stream_name):
+    logs_client.create_log_stream(
+        logGroupName=log_group_name
+        , logStreamName=log_stream_name
+    )
+
+
+def get_most_recent_log_stream(log_group_name):
+    try:
+        response = logs_client.describe_log_streams(
+            logGroupName=log_group_name,
+            orderBy='LogStreamName',
+            descending=True,
+            limit=1
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceNotFoundException':
+            print('Log group does not exist. Run \'bokchoi deploy\' to deploy project and create a log group.')
+            return
+        else:
+            raise e
+
+    try:
+        log_stream = response['logStreams'][0]
+    except IndexError:
+        print('No log streams found. Try \'bokchoi run\' to create some logs.')
+        return
+
+    return log_stream['logStreamName']
+
+
+def get_log_messages(log_group_name, log_stream_name, next_token=None):
+
+    log_request = {
+        'logGroupName': log_group_name,
+        'logStreamName': log_stream_name
+    }
+
+    if next_token:
+        log_request['nextToken'] = next_token
+
+    response = logs_client.get_log_events(
+        **log_request
+    )
+
+    next_token = response['nextForwardToken'] if response['events'] else next_token
+
+    return response['events'], next_token
+
+
+def delete_log_group(log_group_name, dryrun=True):
+
+    if dryrun:
+        print('Dryrun flag set. Would have deleted log group ' + log_group_name)
+        return
+
+    try:
+        logs_client.delete_log_group(
+            logGroupName=log_group_name
+        )
+        print('Deleted log group ' + log_group_name)
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceNotFoundException':
+            print('Log group does not exist ' + log_group_name)
+        else:
+            raise e
