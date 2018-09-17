@@ -106,7 +106,7 @@ def get_security_groups(project_id, *group_names):
                 'Values': [project_id]}]
 
     if group_names:
-        filters.append({'Name': 'group-name', 'Values': [*group_names]})
+        filters.append({'Name': 'group-name', 'Values': list(group_names)})
 
     response = ec2_client.describe_security_groups(Filters=filters)
 
