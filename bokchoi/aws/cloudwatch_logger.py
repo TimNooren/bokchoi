@@ -31,20 +31,23 @@ class CloudwatchLogger:
         )
 
         log_stream = response['logStreams'][0]
+        next_token = log_stream.get('uploadSequenceToken')
 
-        return log_stream['logStreamName'], log_stream['uploadSequenceToken']
+        return log_stream['logStreamName'], next_token
 
     def log_message(self, message):
         """Log message to Cloudwatch log group"""
         log_info = {'logGroupName': self.log_group_name,
                     'logStreamName': self.log_stream_name,
-                    'sequenceToken': self.sequence_token,
                     'logEvents': [
                         {
                             'timestamp': int(1000 * time.time()),
                             'message': '[{}]: {}'.format(self.stage, message)
                         },
                     ]}
+
+        if self.sequence_token:
+            log_info['sequenceToken'] = self.sequence_token
 
         response = self.logs_client.put_log_events(**log_info)
 
