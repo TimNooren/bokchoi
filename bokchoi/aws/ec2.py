@@ -4,49 +4,12 @@ Class which can be used to deploy and run EC2 spot instances
 """
 
 from base64 import b64encode
+import os
+import time
 
 from bokchoi import utils
 from bokchoi.ssh import SSH
 from bokchoi.aws import common
-
-USER_DATA = """#!/bin/bash
-
-# Install aws-cli
-sudo curl "https://s3.amazonaws.com/aws-cli/awscli-bundle.zip" -o "awscli-bundle.zip"
-python3 -c "import zipfile; zf = zipfile.ZipFile('/awscli-bundle.zip'); zf.extractall('/');"
-sudo chmod u+x /awscli-bundle/install
-python3 /awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws
-
-# Download project zip
-aws s3 cp s3://{bucket}/{package} /tmp/
-python3 -c "import zipfile; zf = zipfile.ZipFile('/tmp/{package}'); zf.extractall('/tmp/');"
-
-# Install pip3 and install requirements.txt from project zip if included
-curl -sS https://bootstrap.pypa.io/get-pip.py | sudo python3
-[ -f /tmp/requirements.txt ] && pip3 install -r /tmp/requirements.txt
-
-if [ "{notebook}" = "True" ]
-then
-    #Add public key
-    echo "ssh-rsa {public_key}" >> /home/ubuntu/.ssh/authorized_keys
-    #Install Jupyter
-    pip3 install jupyter
-    pip3 install jupyterlab
-    jupyter serverextension enable --py jupyterlab --sys-prefix
-    pip3 install tornado==4.5.2
-    echo "c.NotebookApp.token = u''" >> ~/.jupyter/jupyter_notebook_config.py
-    jupyter lab --no-browser --allow-root --ip=0.0.0.0 --port=8888 --NotebookApp.token=
-else
-    # Run app
-    cd /tmp
-    python3 {entrypoint}
-    aws s3 cp /var/log/cloud-init-output.log s3://{bucket}/cloud-init-output.log
-    if [ "{shutdown}" = "True" ]
-    then
-        shutdown -h now
-    fi
-fi
-"""
 
 DEFAULT_TRUST_POLICY = """{
   "Version": "2012-10-17",
@@ -73,6 +36,13 @@ DEFAULT_POLICY = """{{
       ],
       "Effect": "Allow",
       "Resource": "arn:aws:s3:::{bucket}/*"
+    }},
+    {{
+      "Action": [
+        "logs:*"
+      ],
+      "Effect": "Allow",
+      "Resource": "*"
     }}
   ]
 }}"""
@@ -81,15 +51,16 @@ DEFAULT_POLICY = """{{
 class EC2:
     """Create EC2 object which can be used to schedule jobs"""
 
+    region = common.get_default_region()
+
     default_config = {
-        'Region': '',
-        'SpotPrice': '0.10',
-        'LaunchSpecification': {
-            'ImageId': '',
-            'InstanceType': 'c5.xlarge',
-            'SubnetId': ''
+            'SpotPrice': '0.10',
+            'LaunchSpecification': {
+                'ImageId': '',
+                'InstanceType': 'c5.xlarge',
+                'SubnetId': ''
             }
-        }
+    }
 
     def __init__(self, project_name, config):
 
@@ -105,7 +76,7 @@ class EC2:
 
     def validate(self, config):
 
-        non_optional = {'SpotPrice', 'Region', 'LaunchSpecification'}
+        non_optional = {'SpotPrice', 'LaunchSpecification'}
         missing_keys = non_optional - set(config)
 
         if missing_keys:
@@ -114,7 +85,7 @@ class EC2:
     def deploy(self, path):
         """Zip package and deploy to S3"""
 
-        bucket_name = common.create_bucket(self.config['EC2']['Region'], self.project_id)
+        bucket_name = common.create_bucket(self.region, self.project_id)
 
         package, fingerprint = utils.zip_package(path, self.config.get('Requirements', []))
         common.upload_to_s3(bucket_name, package, self.package_name, fingerprint)
@@ -131,6 +102,9 @@ class EC2:
                                         , 'ToPort': 22
                                         , 'IpProtocol': 'tcp'}
                                      )
+
+        common.create_log_group(self.project_id)
+
         return 'Deployed!'
 
     def undeploy(self, dryrun):
@@ -155,6 +129,8 @@ class EC2:
         for group in common.get_security_groups(self.project_id):
             common.delete_security_group(group, dryrun)
 
+        common.delete_log_group(self.project_id, dryrun)
+
         return 'Undeployed!'
 
     def run(self):
@@ -169,17 +145,27 @@ class EC2:
             else:
                 self.launch_spec['SecurityGroupIds'] = [security_group.group_id]
 
-        user_data = USER_DATA.format(bucket=self.project_id
-                                     , package=self.package_name
-                                     , entrypoint=self.config['EntryPoint']
-                                     , shutdown=self.config.get('Shutdown', True)
-                                     , notebook=self.config.get('Notebook', False)
-                                     , public_key=public_key)
+        with open(os.path.join(os.path.dirname(__file__), 'ec2-startup-script.sh'), 'r') as _file:
+            startup_script = _file.read()
+
+        user_data = startup_script.format(region=self.region
+                                          , project_id=self.project_id
+                                          , bucket=self.project_id
+                                          , package=self.package_name
+                                          , entrypoint=self.config['EntryPoint']
+                                          , shutdown=self.config.get('Shutdown', True)
+                                          , notebook=self.config.get('Notebook', False)
+                                          , public_key=public_key)
 
         self.launch_spec['UserData'] = b64encode(user_data.encode('ascii')).decode('ascii')
         self.launch_spec['IamInstanceProfile'] = {'Name': self.project_id}
 
         common.request_spot_instances(self.project_id, self.launch_spec, self.config['EC2']['SpotPrice'])
+
+        log_stream_name = 'bokchoi-{}'.format(int(time.time()))
+        common.create_log_stream(self.project_id, log_stream_name)
+
+        print('Writing logs to: ' + log_stream_name)
 
         return 'Running application'
 
@@ -231,3 +217,27 @@ class EC2:
         print('\nStatus:')
         for instance in common.get_instances(self.project_id):
             print('\t' + instance.instance_id + ' : ' + instance.state['Name'])
+
+    def logs(self):
+        """Retrieve logs of latest run if available"""
+
+        most_recent_log_stream = common.get_most_recent_log_stream(self.project_id)
+
+        if not most_recent_log_stream:
+            return
+
+        print('Reading logs from: ' + most_recent_log_stream)
+
+        next_token = None
+
+        while True:
+            events, next_token = common.get_log_messages(self.project_id, most_recent_log_stream, next_token)
+
+            for event in events:
+
+                if 'log-termination' in event['message']:
+                    return
+
+                print(event['message'].strip('\n'))
+
+            time.sleep(2)
