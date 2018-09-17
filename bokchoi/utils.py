@@ -6,6 +6,8 @@ from io import BytesIO
 import os
 import zipfile
 
+from bokchoi.aws import cloudwatch_logger
+
 
 def retry(func, exc, **kwargs):
     """ Retries boto3 function call in case a ClientError occurs
@@ -52,8 +54,9 @@ def zip_package(path, requirements=None):
                 fn = os.path.join(base, file_name)
                 zip_file.write(fn, fn[rootlen:])
 
-        requirements = requirements or ''
-        zip_file.writestr('requirements.txt', '\n'.join(requirements))
+        zip_file.write(cloudwatch_logger.__file__, 'cloudwatch_logger.py')
+
+        zip_file.writestr('requirements.txt', '\n'.join(requirements or ''))
 
         fingerprint = '|'.join([str(elem.CRC) for elem in zip_file.infolist()])
 
