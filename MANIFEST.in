@@ -1,3 +1,4 @@
 include README.md
 include LICENSE
 include bokchoi/gcp/gcp-startup-script.sh
+include bokchoi/aws/ec2-startup-script.sh

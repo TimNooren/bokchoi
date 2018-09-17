@@ -302,3 +302,6 @@ class GCP(object):
 
     def status(self):
         print('Status not yet implemented')
+
+    def logs(self):
+        print('Logs not yet implemented')
