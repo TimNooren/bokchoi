@@ -7,7 +7,7 @@ fi
 
 apt-get update \
     && apt-get -y upgrade \
-    && apt-get install -y python3-pip python3-dev unzip \
+    && apt-get install -y python3-minimal python3-pip python3-dev unzip \
     && pip3 install --upgrade pip
 
 BUCKET_NAME=$(curl http://metadata/computeMetadata/v1/instance/attributes/bucket_name -H "Metadata-Flavor: Google")
@@ -19,7 +19,7 @@ ZONE=$(curl http://metadata/computeMetadata/v1/instance/attributes/zone -H "Meta
 gsutil cp gs://${BUCKET_NAME}/${PACKAGE_NAME} .
 unzip ${PACKAGE_NAME}
 
-pip3.5 install -r requirements.txt
-python3.5 ${ENTRYPOINT} >> logs.txt 2>&1
+python3 -m pip install -r requirements.txt >> logs.txt 2>&1
+python3 ${ENTRYPOINT} >> logs.txt 2>&1
 gsutil cp logs.txt gs://${BUCKET_NAME}/${PACKAGE_NAME}-logs.txt
 gcloud compute instances delete ${INSTANCE_NAME} --zone ${ZONE}
