@@ -97,7 +97,7 @@ class GCP(object):
         :return: Defined Compute Engine configuration
         """
         image_response = self.compute.images().getFromFamily(
-            project='debian-cloud', family='debian-9').execute()
+            project='ubuntu-os-cloud', family='ubuntu-1804-lts').execute()
 
         machine_type = "zones/{}/machineTypes/{}".format(
             self.gcp.get('zone'), self.gcp.get('instance_type'))
