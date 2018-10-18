@@ -11,8 +11,12 @@ except ImportError:
 
 setup(
     name="bokchoi",
-    version="0.4.0",
+    version="0.4.1",
     packages=['bokchoi', 'bokchoi.aws', 'bokchoi.gcp'],
+    package_dir={'bokchoi.aws': 'bokchoi/aws',
+                 'bokchoi.gcp': 'bokchoi/gcp'},
+    package_data={'bokchoi.aws': ['ec2-startup-script.sh'],
+                  'bokchoi.gcp': ['gcp-startup-script.sh']},
     install_requires=[
         'Click',
         'boto3',
