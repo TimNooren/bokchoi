@@ -217,7 +217,7 @@ class GCP(object):
         """Create a new storage bucket which will be used for the defined job"""
         print('Creating bucket')
         try:
-            bucket = self.storage.create_bucket(self.gcp.get('bucket'))
+            bucket = self.storage.create_bucket(self.gcp.get('bucket'), project=self.gcp.get('project'))
             return bucket
         except exceptions.Conflict as e:
             if 'You already own this bucket' in str(e):
