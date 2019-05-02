@@ -70,14 +70,16 @@ class GCP(object):
         required = ['ProjectId', 'AuthKeyLocation', 'Bucket']
         [check_none(v) for v in required]
 
+        region = gcp.get('Region', 'europe-west4')
+
         return {
             'project': gcp.get('ProjectId'),
             'auth_key': gcp.get('AuthKeyLocation'),
             'bucket': gcp.get('Bucket'),
-            'region': gcp.get('Region', 'europe-west4'),
+            'region': region,
             'zone': gcp.get('Zone', 'europe-west4-b'),
-            'network': gcp.get('Network', 'default'),
-            'sub_network': gcp.get('SubNetwork', 'default'),
+            'network': gcp.get('Network', 'global/networks/default'),
+            'sub_network': gcp.get('SubNetwork', 'regions/{}/subnetworks/default'.format(region)),
             'instance_type': gcp.get('InstanceType', 'n1-standard-1'),
             'preemptible': gcp.get('Preemptible', False),
             'disk_space': gcp.get('DiskSpaceGb', 25)
