@@ -142,8 +142,8 @@ following this guide: https://cloud.google.com/iam/docs/creating-managing-servic
 | Bucket | yes | None | Unique bucket name for Google Storage |
 | Region  | no  | europe-west4 | Region where the instance will run |
 | Zone | no  | europe-west4-b | Zone where the instance will run |
-| Network | no  | default | Fully qualified network name (projects/**project**/global/**networks**/**network**) |
-| SubNetwork | no  | default | Fully qualified sub-network name (projects/**project**/regions/**region**/subnetworks/**subnetwork**) |
+| Network | no  | default | Fully qualified network name (e.g. projects/**project**/global/networks/**network**) |
+| SubNetwork | no  | default | Fully qualified sub-network name (e.g. projects/**project**/regions/**region**/subnetworks/**subnetwork**) |
 | InstanceType | no  | n1-standard-1 | Machine type |
 | Preemptible | no  | false | Whether the app runs on cheaper temporary instances |
 | DiskSizeGb | no  | 100 | Size (in GB) of the created disk |
