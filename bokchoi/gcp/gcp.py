@@ -125,9 +125,8 @@ class GCP(object):
             },
 
             'networkInterfaces': [{
-                'network': 'global/networks/{}'.format(self.gcp.get('network')),
-                'subnetwork': '/regions/{}/subnetworks/{}'.format(
-                    self.gcp.get('region'), self.gcp.get('sub_network')),
+                'network': self.gcp.get('network'),
+                'subnetwork': self.gcp.get('sub_network'),
                 'accessConfigs': [
                     {'type': 'ONE_TO_ONE_NAT', 'name': 'External NAT'}
                 ]
