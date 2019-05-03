@@ -67,7 +67,7 @@ class GCP(object):
             if not gcp.get(v):
                 raise Exception('{} is required, please add it to the config'.format(v))
 
-        required = ['ProjectId', 'AuthKeyLocation', 'Bucket']
+        required = ['ProjectId', 'Bucket']
         [check_none(v) for v in required]
 
         return {
