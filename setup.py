@@ -11,7 +11,7 @@ except ImportError:
 
 setup(
     name="bokchoi",
-    version="0.4.3",
+    version="0.4.4",
     packages=['bokchoi', 'bokchoi.aws', 'bokchoi.gcp'],
     package_dir={'bokchoi.aws': 'bokchoi/aws',
                  'bokchoi.gcp': 'bokchoi/gcp'},
