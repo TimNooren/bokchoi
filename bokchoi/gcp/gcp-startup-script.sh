@@ -5,6 +5,13 @@ then
     sudo su
 fi
 
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update \
+    && apt-get -y upgrade \
+    && apt-get install -y python3-minimal python3-pip python3-dev unzip \
+    && pip3 install --upgrade pip
+
 apt-get update \
     && apt-get -y upgrade \
     && apt-get install -y python3-minimal python3-pip python3-dev unzip \
