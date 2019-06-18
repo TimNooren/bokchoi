@@ -12,11 +12,6 @@ apt-get update \
     && apt-get install -y python3-minimal python3-pip python3-dev unzip \
     && pip3 install --upgrade pip
 
-apt-get update \
-    && apt-get -y upgrade \
-    && apt-get install -y python3-minimal python3-pip python3-dev unzip \
-    && pip3 install --upgrade pip
-
 BUCKET_NAME=$(curl http://metadata/computeMetadata/v1/instance/attributes/bucket_name -H "Metadata-Flavor: Google")
 PACKAGE_NAME=$(curl http://metadata/computeMetadata/v1/instance/attributes/package_name -H "Metadata-Flavor: Google")
 ENTRYPOINT=$(curl http://metadata/computeMetadata/v1/instance/attributes/entry_point -H "Metadata-Flavor: Google")
